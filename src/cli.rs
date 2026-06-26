@@ -14,7 +14,7 @@ use std::path::PathBuf;
 use anyhow::{Context, Result};
 
 use crate::engine::{region_pair_config, Config, Converter, Region};
-use crate::DEFAULT_CONFIG;
+use crate::{detect, DEFAULT_CONFIG};
 
 const HELP: &str = "\
 zhhz — self-contained Simplified/Traditional Chinese converter
@@ -148,7 +148,22 @@ fn bail_unknown(arg: &str) -> Result<Action> {
 
 /// Entry point invoked by `main`.
 pub fn run() -> Result<()> {
-    match parse_args(std::env::args().collect())? {
+    let argv: Vec<String> = std::env::args().collect();
+    // Route to `detect` subcommand if the first non-flag arg is "detect".
+    if argv.iter().skip(1).any(|a| a == "detect") {
+        // Strip the "detect" token and forward the rest to `detect::run`.
+        let mut rest = Vec::with_capacity(argv.len());
+        let mut skipping = false;
+        for a in argv.iter().skip(1) {
+            if !skipping && a == "detect" {
+                skipping = true;
+                continue;
+            }
+            rest.push(a.clone());
+        }
+        return detect::run(&rest);
+    }
+    match parse_args(argv)? {
         Action::Help => {
             println!("{HELP}");
             Ok(())
