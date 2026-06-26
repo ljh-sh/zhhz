@@ -27,6 +27,9 @@ pub mod detect;
 pub mod dict;
 pub mod engine;
 
+#[cfg(feature = "wasm")]
+pub mod wasm;
+
 pub use detect::{detect_bytes, detect_text, Detection};
 pub use dict::Dict;
 pub use engine::{Config, Converter, Region};

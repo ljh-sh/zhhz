@@ -26,6 +26,10 @@ exclude = [
 [lib]
 name = "zhhz"
 path = "src/lib.rs"
+# Both `cdylib` (for the `wasm32-unknown-unknown` build via the `wasm`
+# feature) and `rlib` (for the native CLI + Rust consumers). The native
+# release only ships the CLI binary, not the cdylib.
+crate-type = ["cdylib", "rlib"]
 
 [[bin]]
 name = "zhhz"
@@ -36,6 +40,14 @@ anyhow = "1"
 # Only serde_json for config parsing. The CLI arg parser is hand-rolled
 # (src/cli.rs) to keep the dependency tree tiny and the static binary small.
 serde_json = "1"
+# WebAssembly bindings (only pulled in with --features wasm).
+wasm-bindgen = { version = "0.2", optional = true }
+js-sys = { version = "0.3", optional = true }
+
+[features]
+# Build the WebAssembly bindings (used by `cargo build --target
+# wasm32-unknown-unknown --features wasm`).
+wasm = ["dep:wasm-bindgen", "dep:js-sys"]
 
 # Small, fully-static release binary. The OpenCC data (~1.3 MiB of UTF-8 text)
 # is embedded via include_str!, so the binary is self-contained.

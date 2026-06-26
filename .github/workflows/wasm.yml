@@ -1,0 +1,94 @@
+name: WASM (zhhz)
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions: read-all
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  wasm:
+    name: Build & test the WebAssembly bindings
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+
+      - name: Setup Rust (pinned)
+        uses: actions-rust-lang/setup-rust-toolchain@4d1965c9142484e48d40c19de54b5cba84953a06 # v1.10.0
+        with:
+          toolchain: stable-2024-11-28
+          target: wasm32-unknown-unknown
+          # `wasm32-unknown-unknown` is added by the toolchain; this also
+          # fetches the matching `rust-std` component.
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2.7.7
+        with:
+          cache-on-failure: true
+
+      - name: Install wasm-pack
+        run: curl -fsSL https://rustwasm.github.io/wasm-pack/installer/init.sh | sh
+
+      - name: Build (nodejs target)
+        run: wasm-pack build --target nodejs --features wasm --release
+
+      - name: Smoke test in Node
+        run: |
+          node --version
+          node -e '
+            const pkg = require("./pkg");
+            const { convert, detect } = pkg;
+            // 1. cn-s -> cn-t
+            console.log("s2t:", convert("汉字计算机软件", "s2t"));
+            // 2. cn-tw -> cn-s
+            console.log("tw2sp:", convert("他感染了A型肝炎", "tw2sp"));
+            // 3. detect
+            const d = detect("他去了西維珍尼亞州");
+            console.log("detect:", d);
+            if (d.region !== "cn-hk") process.exit(1);
+            if (d.confidence < 30) process.exit(1);
+          '
+
+      - name: Build (web target for browsers)
+        run: wasm-pack build --target web --features wasm --release
+        # produces pkg/ again (overwrites) — kept as a final sanity check that
+        # the web build also succeeds (different JS glue generation than nodejs).
+
+  publish:
+    name: Publish npm package
+    needs: wasm
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+
+      - name: Setup Rust (pinned) + add wasm32 target
+        uses: actions-rust-lang/setup-rust-toolchain@4d1965c9142484e48d40c19de54b5cba84953a06 # v1.10.0
+        with:
+          toolchain: stable-2024-11-28
+          target: wasm32-unknown-unknown
+
+      - name: Install wasm-pack
+        run: curl -fsSL https://rustwasm.github.io/wasm-pack/installer/init.sh | sh
+
+      # Re-build for the npm target. `wasm-pack build` populates `pkg/` with
+      # the JS glue, the .wasm, and a `package.json` already pointing at
+      # the right `main` / `module` / `types` fields.
+      - name: Build (bundler-friendly npm target)
+        run: wasm-pack build --target bundler --features wasm --release
+
+      - name: Publish to npm
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish pkg --access public
