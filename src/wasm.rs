@@ -10,8 +10,8 @@
 
 use wasm_bindgen::prelude::*;
 
-use crate::engine::{Config, Converter};
 use crate::detect;
+use crate::engine::{Config, Converter};
 
 /// Convert `text` from a script variant to another using one of the
 /// built-in OpenCC configs (`s2t`, `t2s`, `s2twp`, ...). See the
