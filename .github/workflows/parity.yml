@@ -1,0 +1,48 @@
+name: Parity (zhhz vs opencc)
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions: read-all
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  parity:
+    name: Differential parity against opencc (same data)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+
+      - name: Install build deps (cmake, C++ compiler, python3)
+        run: sudo apt-get update && sudo apt-get install -y cmake g++ python3
+
+      - name: Setup Rust
+        uses: actions-rust-lang/setup-rust-toolchain@4d1965c9142484e48d40c19de54b5cba84953a06 # v1.10.0
+        with:
+          # toolchain channel is pinned in rust-toolchain.toml
+          components: rustfmt, clippy
+
+      - name: Check formatting
+        run: cargo fmt -- --check
+
+      - name: Run clippy
+        run: cargo clippy --all-targets --all-features --locked -- -D warnings
+
+      - name: Run tests
+        run: cargo test --all-features --locked
+
+      - name: Build opencc reference from data/UPSTREAM
+        run: scripts/build-reference-opencc.sh ./reference-opencc
+
+      - name: Differential parity (zhhz vs opencc @ vendored data)
+        env:
+          OPENCC_BIN: ${{ github.workspace }}/reference-opencc/bin/opencc
+          OPENCC_DATA_DIR: ${{ github.workspace }}/reference-opencc/share/opencc
+        run: cargo run --example parity

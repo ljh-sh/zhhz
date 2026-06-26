@@ -119,6 +119,110 @@ impl Config {
     }
 }
 
+/// A script variant that `zhhz` can convert to/from. Codes are stable,
+/// short identifiers for the CLI (`--from cn-s --to cn-tw`).
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub enum Region {
+    /// Simplified Chinese (mainland).
+    CnS,
+    /// Traditional Chinese, OpenCC standard.
+    CnT,
+    /// Traditional Chinese (Taiwan standard).
+    CnTw,
+    /// Traditional Chinese (Hong Kong standard).
+    CnHk,
+    /// Japanese Kyūjitai (old-form kanji).
+    JpT,
+    /// Japanese Shinjitai (new-form kanji).
+    JpN,
+}
+
+impl Region {
+    /// All regions in canonical order.
+    pub const ALL: [Region; 6] = [
+        Region::CnS,
+        Region::CnT,
+        Region::CnTw,
+        Region::CnHk,
+        Region::JpT,
+        Region::JpN,
+    ];
+
+    /// The short, stable region code used on the CLI (`cn-s`, `cn-tw`, ...).
+    pub fn code(&self) -> &'static str {
+        match self {
+            Region::CnS => "cn-s",
+            Region::CnT => "cn-t",
+            Region::CnTw => "cn-tw",
+            Region::CnHk => "cn-hk",
+            Region::JpT => "jp-t",
+            Region::JpN => "jp-n",
+        }
+    }
+
+    /// A human-readable description for `--list` and error messages.
+    pub fn description(&self) -> &'static str {
+        match self {
+            Region::CnS => "Simplified Chinese (mainland)",
+            Region::CnT => "Traditional Chinese (OpenCC standard)",
+            Region::CnTw => "Traditional Chinese (Taiwan standard)",
+            Region::CnHk => "Traditional Chinese (Hong Kong standard)",
+            Region::JpT => "Japanese Kyūjitai (old-form)",
+            Region::JpN => "Japanese Shinjitai (new-form)",
+        }
+    }
+
+    /// Parse a region code (`cn-s`, `cn-tw`, ...); case-sensitive, returns an
+    /// error listing valid codes on miss.
+    pub fn parse(s: &str) -> Result<Region, String> {
+        for r in Region::ALL {
+            if r.code() == s {
+                return Ok(r);
+            }
+        }
+        let codes: Vec<&str> = Region::ALL.iter().map(|r| r.code()).collect();
+        Err(format!("unknown region '{s}'. Valid: {}", codes.join(", ")))
+    }
+}
+
+/// Resolve a `(from, to)` region pair to the OpenCC config that performs it.
+/// Returns an error for identity pairs and for pairs without a direct config.
+pub fn region_pair_config(from: Region, to: Region) -> Result<Config, String> {
+    use Region::*;
+    Ok(match (from, to) {
+        (CnS, CnT) => Config::S2t,
+        (CnT, CnS) => Config::T2s,
+        (CnS, CnTw) => Config::S2twp,
+        (CnTw, CnS) => Config::Tw2sp,
+        (CnS, CnHk) => Config::S2hkp,
+        (CnHk, CnS) => Config::Hk2sp,
+        (CnT, CnTw) => Config::T2tw,
+        (CnTw, CnT) => Config::Tw2t,
+        (CnT, CnHk) => Config::T2hk,
+        (CnHk, CnT) => Config::Hk2t,
+        (JpN, JpT) => Config::Jp2t,
+        (JpT, JpN) => Config::T2jp,
+        (JpN, CnT) => Config::Jp2t,
+        (CnT, JpN) => Config::T2jp,
+        (f, t) if f == t => {
+            return Err(format!(
+                "no conversion needed: {} -> {}",
+                f.code(),
+                t.code()
+            ))
+        }
+        (f, t) => {
+            return Err(format!(
+                "no direct conversion from '{}' to '{}'; try an intermediate (e.g. {} -> cn-t -> {})",
+                f.code(),
+                t.code(),
+                f.code(),
+                t.code()
+            ));
+        }
+    })
+}
+
 /// A configured converter. Cheap to clone is *not* supported; build one per
 /// pipeline and reuse it for many inputs.
 pub struct Converter {
@@ -332,5 +436,43 @@ mod tests {
         let c = Converter::with_custom(Config::S2t, &[("软件".to_string(), "軟體".to_string())]);
         assert_eq!(c.convert("软件"), "軟體");
         assert_eq!(c.convert("买软件"), "買軟體");
+    }
+
+    #[test]
+    fn region_parse_roundtrip() {
+        for r in Region::ALL {
+            assert_eq!(Region::parse(r.code()).unwrap(), r);
+        }
+        assert!(Region::parse("xx").is_err());
+    }
+
+    #[test]
+    fn region_pairs_mainline() {
+        use Region::*;
+        assert_eq!(region_pair_config(CnS, CnT).unwrap(), Config::S2t);
+        assert_eq!(region_pair_config(CnT, CnS).unwrap(), Config::T2s);
+        assert_eq!(region_pair_config(CnS, CnTw).unwrap(), Config::S2twp);
+        assert_eq!(region_pair_config(CnTw, CnS).unwrap(), Config::Tw2sp);
+        assert_eq!(region_pair_config(CnS, CnHk).unwrap(), Config::S2hkp);
+        assert_eq!(region_pair_config(CnHk, CnS).unwrap(), Config::Hk2sp);
+        assert_eq!(region_pair_config(CnT, CnTw).unwrap(), Config::T2tw);
+        assert_eq!(region_pair_config(CnTw, CnT).unwrap(), Config::Tw2t);
+        assert_eq!(region_pair_config(CnT, CnHk).unwrap(), Config::T2hk);
+        assert_eq!(region_pair_config(CnHk, CnT).unwrap(), Config::Hk2t);
+        assert_eq!(region_pair_config(JpN, JpT).unwrap(), Config::Jp2t);
+        assert_eq!(region_pair_config(JpT, JpN).unwrap(), Config::T2jp);
+    }
+
+    #[test]
+    fn region_pair_identity_errors() {
+        for r in Region::ALL {
+            assert!(region_pair_config(r, r).is_err());
+        }
+    }
+
+    #[test]
+    fn region_pair_no_direct_errors() {
+        // cn-s -> jp-n has no single opencc config; suggest an intermediate.
+        assert!(region_pair_config(Region::CnS, Region::JpN).is_err());
     }
 }

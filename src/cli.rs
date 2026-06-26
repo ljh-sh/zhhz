@@ -4,7 +4,7 @@
 //! tiny and the static binary small. Supported form:
 //!
 //! ```text
-//! zhhz [--config <CONFIG>] [--dict <FILE>...] [--in-place] [--list] [FILE...]
+//! zhhz [--config <CONFIG>] [--from <R> --to <R>] [--dict <FILE>...] [--in-place] [--list] [FILE...]
 //! zhhz --help | --version
 //! ```
 
@@ -13,14 +13,15 @@ use std::path::PathBuf;
 
 use anyhow::{Context, Result};
 
-use crate::engine::{Config, Converter};
+use crate::engine::{region_pair_config, Config, Converter, Region};
 use crate::DEFAULT_CONFIG;
 
 const HELP: &str = "\
 zhhz — self-contained Simplified/Traditional Chinese converter
 
 USAGE:
-    zhhz [--config <CONFIG>] [--dict <FILE>...] [--in-place] [--list] [FILE...]
+    zhhz [--config <CONFIG> | --from <R> --to <R>] [--dict <FILE>...] [--in-place] [FILE...]
+    zhhz --list
     zhhz < input.txt > output.txt
 
 Reads from stdin when no FILE is given. Use '-' for stdin.
@@ -29,22 +30,28 @@ OPTIONS:
     -c, --config <CONFIG>   Conversion config (default: s2t). One of:
                              s2t t2s s2tw tw2s s2hk hk2s s2twp tw2sp
                              s2hkp hk2sp t2tw tw2t t2hk hk2t t2jp jp2t
+        --from <REGION>     Source script region (alternative to --config).
+        --to   <REGION>     Target script region (requires --from).
+                             Regions: cn-s cn-t cn-tw cn-hk jp-t jp-n
         --dict <FILE>       Custom dictionary (TSV: key<TAB>value), highest
                              priority. May be repeated. '#' lines are ignored.
     -i, --in-place          Rewrite each input FILE in place (not stdin).
-    -l, --list              List available configs and exit.
+    -l, --list              List regions and supported conversions.
     -h, --help              Show this help.
     -V, --version           Show version.
 
 EXAMPLES:
-    echo '汉字' | zhhz                       # s2t: 漢字
-    echo '漢字' | zhhz -c t2s                # t2s: 汉字
-    echo '鼠标' | zhhz -c s2tw               # s2tw: 滑鼠
-    zhhz -c s2t --dict mywords.txt input.txt # with custom conversions
+    echo '汉字' | zhhz --from cn-s --to cn-t      # 漢字
+    echo '汉字' | zhhz --from cn-s --to cn-tw     # 資訊-style Taiwan phrases
+    echo '鼠标' | zhhz --from cn-s --to cn-tw     # 滑鼠
+    echo '漢字' | zhhz --from cn-tw --to cn-s     # simplified
+    zhhz -c s2t --dict mywords.txt input.txt      # legacy --config form
 ";
 
 pub struct Cli {
-    pub config: String,
+    pub config: Option<String>,
+    pub from: Option<String>,
+    pub to: Option<String>,
     pub dicts: Vec<PathBuf>,
     pub in_place: bool,
     pub list: bool,
@@ -59,7 +66,9 @@ enum Action {
 
 fn parse_args(argv: Vec<String>) -> Result<Action> {
     let mut cli = Cli {
-        config: DEFAULT_CONFIG.to_string(),
+        config: None,
+        from: None,
+        to: None,
         dicts: Vec::new(),
         in_place: false,
         list: false,
@@ -73,8 +82,10 @@ fn parse_args(argv: Vec<String>) -> Result<Action> {
             "-l" | "--list" => cli.list = true,
             "-i" | "--in-place" => cli.in_place = true,
             "-c" | "--config" => {
-                cli.config = take_value(&mut args, "--config")?;
+                cli.config = Some(take_value(&mut args, "--config")?);
             }
+            "--from" => cli.from = Some(take_value(&mut args, "--from")?),
+            "--to" => cli.to = Some(take_value(&mut args, "--to")?),
             "--dict" => {
                 cli.dicts
                     .push(PathBuf::from(take_value(&mut args, "--dict")?));
@@ -84,21 +95,19 @@ fn parse_args(argv: Vec<String>) -> Result<Action> {
                 break;
             }
             other if other.starts_with("--") => {
-                // Handle `--flag=value` and reject `--in-place=...` / `--list=...`.
                 let (flag, val) = match other.split_once('=') {
                     Some((f, v)) => (f, Some(v)),
                     None => (other, None),
                 };
                 match flag {
-                    "--config" => {
-                        cli.config = take_owned_value(flag, val)?;
-                    }
+                    "--config" => cli.config = Some(take_owned_value(flag, val)?),
+                    "--from" => cli.from = Some(take_owned_value(flag, val)?),
+                    "--to" => cli.to = Some(take_owned_value(flag, val)?),
                     "--dict" => cli.dicts.push(PathBuf::from(take_owned_value(flag, val)?)),
                     "--in-place" | "--list" => {
                         if val.is_some() {
                             return Err(anyhow::anyhow!("option {flag} does not take a value"));
                         }
-                        // already handled as a flag above when no '='; no-op here
                     }
                     _ => return bail_unknown(other),
                 }
@@ -106,6 +115,14 @@ fn parse_args(argv: Vec<String>) -> Result<Action> {
             other if other.starts_with('-') && other.len() > 1 => return bail_unknown(other),
             _ => cli.files.push(PathBuf::from(arg)),
         }
+    }
+    if (cli.from.is_some()) != (cli.to.is_some()) {
+        return Err(anyhow::anyhow!("--from and --to must be used together"));
+    }
+    if cli.config.is_some() && (cli.from.is_some() || cli.to.is_some()) {
+        return Err(anyhow::anyhow!(
+            "--config is mutually exclusive with --from/--to"
+        ));
     }
     Ok(Action::Run(cli))
 }
@@ -144,14 +161,25 @@ pub fn run() -> Result<()> {
     }
 }
 
+fn resolve_config(cli: &Cli) -> Result<Config> {
+    if let (Some(from), Some(to)) = (cli.from.as_deref(), cli.to.as_deref()) {
+        let f = Region::parse(from).map_err(|e| anyhow::anyhow!("invalid --from: {e}"))?;
+        let t = Region::parse(to).map_err(|e| anyhow::anyhow!("invalid --to: {e}"))?;
+        return region_pair_config(f, t).map_err(|e| {
+            anyhow::anyhow!("{e}\nhint: try an intermediate (e.g. {from} -> cn-t -> {to})")
+        });
+    }
+    let cfg_name = cli.config.as_deref().unwrap_or(DEFAULT_CONFIG);
+    Config::parse(cfg_name).map_err(|e| anyhow::anyhow!("invalid --config: {e}"))
+}
+
 fn run_cli(cli: Cli) -> Result<()> {
     if cli.list {
-        list_configs();
+        list_regions_and_configs();
         return Ok(());
     }
 
-    let config =
-        Config::parse(&cli.config).map_err(|e| anyhow::anyhow!("invalid --config: {e}"))?;
+    let config = resolve_config(&cli)?;
     let custom = load_custom_dicts(&cli.dicts)?;
     let converter = Converter::with_custom(config, &custom);
 
@@ -215,9 +243,32 @@ fn load_custom_dicts(paths: &[PathBuf]) -> Result<Vec<(String, String)>> {
     Ok(entries)
 }
 
-fn list_configs() {
-    println!("{:<8}  DIRECTION", "CONFIG");
-    for cfg in Config::ALL {
-        println!("{:<8}  {}", cfg.name(), cfg.description());
+fn list_regions_and_configs() {
+    println!("{:<6}  DESCRIPTION", "REGION");
+    for r in Region::ALL {
+        println!("{:<6}  {}", r.code(), r.description());
+    }
+    println!();
+    println!("{:<6}  {:<6}  OPENCC CONFIG", "FROM", "TO");
+    let pairs = [
+        ("cn-s", "cn-t"),
+        ("cn-t", "cn-s"),
+        ("cn-s", "cn-tw"),
+        ("cn-tw", "cn-s"),
+        ("cn-s", "cn-hk"),
+        ("cn-hk", "cn-s"),
+        ("cn-t", "cn-tw"),
+        ("cn-tw", "cn-t"),
+        ("cn-t", "cn-hk"),
+        ("cn-hk", "cn-t"),
+        ("jp-n", "jp-t"),
+        ("jp-t", "jp-n"),
+        ("jp-n", "cn-t"),
+        ("cn-t", "jp-n"),
+    ];
+    for (f, t) in pairs {
+        if let Ok(cfg) = region_pair_config(Region::parse(f).unwrap(), Region::parse(t).unwrap()) {
+            println!("{:<6}  {:<6}  {}", f, t, cfg.name());
+        }
     }
 }
