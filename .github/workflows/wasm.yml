@@ -37,7 +37,10 @@ jobs:
         run: curl -fsSL https://rustwasm.github.io/wasm-pack/installer/init.sh | sh
 
       - name: Build (nodejs target)
-        run: wasm-pack build --target nodejs --features wasm --release
+        # `wasm-pack build` defaults to the release profile, so we do NOT
+        # pass `--release` here; doing so makes cargo see the flag twice
+        # ("--release cannot be used multiple times") and abort.
+        run: wasm-pack build --target nodejs --features wasm
 
       - name: Smoke test in Node
         run: |
@@ -57,7 +60,7 @@ jobs:
           '
 
       - name: Build (web target for browsers)
-        run: wasm-pack build --target web --features wasm --release
+        run: wasm-pack build --target web --features wasm
         # produces pkg/ again (overwrites) — kept as a final sanity check that
         # the web build also succeeds (different JS glue generation than nodejs).
 
@@ -86,7 +89,7 @@ jobs:
       # the JS glue, the .wasm, and a `package.json` already pointing at
       # the right `main` / `module` / `types` fields.
       - name: Build (bundler-friendly npm target)
-        run: wasm-pack build --target bundler --features wasm --release
+        run: wasm-pack build --target bundler --features wasm
 
       - name: Publish to npm
         env:
