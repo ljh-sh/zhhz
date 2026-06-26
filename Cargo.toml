@@ -1,0 +1,46 @@
+[package]
+name = "zhhz"
+version = "0.1.0"
+authors = ["ljh-sh <lijunhao@x-cmd.com>"]
+edition = "2021"
+rust-version = "1.74"
+description = "Self-contained, static-build Simplified/Traditional Chinese converter — a pure-Rust, data-embedded reimplementation of OpenCC"
+readme = "README.md"
+homepage = "https://github.com/ljh-sh/zhhz"
+documentation = "https://github.com/ljh-sh/zhhz"
+license = "Apache-2.0"
+repository = "https://github.com/ljh-sh/zhhz"
+keywords = ["chinese", "opencc", "simplified", "traditional", "conversion"]
+categories = ["text-processing", "internationalization", "command-line-utilities"]
+exclude = [
+    ".release-artifacts/",
+    ".github/",
+    ".x-cmd/",
+    "target/",
+    "*.swp",
+    "*.swo",
+    "*~",
+    ".DS_Store",
+]
+
+[lib]
+name = "zhhz"
+path = "src/lib.rs"
+
+[[bin]]
+name = "zhhz"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1"
+# Only serde_json for config parsing. The CLI arg parser is hand-rolled
+# (src/cli.rs) to keep the dependency tree tiny and the static binary small.
+serde_json = "1"
+
+# Small, fully-static release binary. The OpenCC data (~1.3 MiB of UTF-8 text)
+# is embedded via include_str!, so the binary is self-contained.
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true
+panic = "abort"

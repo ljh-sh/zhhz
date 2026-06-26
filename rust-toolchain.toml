@@ -1,0 +1,9 @@
+# Toolchain pin for reproducible release builds.
+#
+# A dated stable channel (stable-YYYY-MM-DD) is an immutable rustup alias
+# that always resolves to the same compiler release, so the same source +
+# Cargo.lock + this channel produce byte-identical artifacts on every run.
+# Bump deliberately; see https://reproducible-builds.org/docs/rust/
+[toolchain]
+channel = "stable-2024-11-28"
+profile = "minimal"

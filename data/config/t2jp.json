@@ -1,0 +1,6 @@
+{
+  "name": "Old Japanese Kanji (Kyūjitai) to New Japanese Kanji (Shinjitai)",
+  "conversion_chain": [
+    { "dict": { "type": "ocd2", "file": "JPShinjitaiCharactersRev.ocd2" } }
+  ]
+}

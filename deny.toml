@@ -1,0 +1,38 @@
+# cargo-deny configuration.
+# Flags license violations, duplicated crates, and known advisories.
+
+[graph]
+all-features = true
+
+[advisories]
+version = 2
+# Treat unmaintained crates as warnings (not failures) to avoid blocking CI on
+# upstream churn. Real RUSTSEC security advisories still fail the check.
+unmaintained = "none"
+yanked = "warn"
+
+[licenses]
+version = 2
+# Allow licenses compatible with Apache-2.0.
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Unicode-DFS-2016",
+    "Unicode-3.0",
+    "Zlib",
+    "CC0-1.0",
+]
+confidence-threshold = 0.8
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]

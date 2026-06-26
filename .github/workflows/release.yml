@@ -1,0 +1,187 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag name (e.g. v0.1.0)'
+        required: true
+        default: v0.1.0-test
+
+permissions: read-all
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+  SOURCE_DATE_EPOCH: 1700000000
+  TZ: UTC
+  LC_ALL: C
+
+
+jobs:
+  build:
+    name: Build (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-musl
+            os: ubuntu-latest
+            cross: true
+          - target: aarch64-unknown-linux-musl
+            os: ubuntu-latest
+            cross: true
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+            cross: true
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-latest
+            cross: true
+          - target: x86_64-pc-windows-gnu
+            os: ubuntu-latest
+            cross: true
+          - target: x86_64-apple-darwin
+            os: macos-latest
+            cross: false
+          - target: aarch64-apple-darwin
+            os: macos-latest
+            cross: false
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+
+      - name: Setup Rust
+        uses: actions-rust-lang/setup-rust-toolchain@4d1965c9142484e48d40c19de54b5cba84953a06 # v1.10.0
+        with:
+          # toolchain channel is pinned in rust-toolchain.toml for reproducible builds
+          target: ${{ matrix.target }}
+
+      - name: Install cargo-zigbuild
+        if: matrix.cross
+        run: pip install cargo-zigbuild
+
+      - name: Build
+        run: |
+          SYSROOT="$(rustc --print sysroot)"
+          export RUSTFLAGS="--remap-path-prefix=${{ github.workspace }}=. --remap-path-prefix=$SYSROOT=/rust --remap-path-prefix=$HOME/.cargo=/cargo"
+          if [ "${{ matrix.cross }}" = "true" ]; then
+            cargo zigbuild --release --locked --target ${{ matrix.target }}
+          else
+            cargo build --release --locked --target ${{ matrix.target }}
+          fi
+
+      - name: Package (Unix)
+        if: runner.os != 'Windows'
+        run: |
+          mkdir -p dist/bin
+          if [ -f target/${{ matrix.target }}/release/zhhz.exe ]; then
+            cp target/${{ matrix.target }}/release/zhhz.exe dist/bin/
+            strip dist/bin/zhhz.exe 2>/dev/null || true
+          else
+            cp target/${{ matrix.target }}/release/zhhz dist/bin/
+            strip dist/bin/zhhz 2>/dev/null || true
+          fi
+          find dist -exec touch -m -t 202311140000.00 {} +
+          tar -cJf dist/zhhz-${{ matrix.target }}.tar.xz -C dist bin
+
+      - name: Package (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          New-Item -ItemType Directory -Force -Path dist/bin | Out-Null
+          Copy-Item target/${{ matrix.target }}/release/zhhz.exe dist/bin/zhhz.exe
+          tar -cJf dist/zhhz-${{ matrix.target }}.tar.xz -C dist bin
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: zhhz-${{ matrix.target }}
+          path: dist/zhhz-${{ matrix.target }}.tar.xz
+
+  release:
+    name: Create GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: read
+      id-token: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+
+      - name: Determine tag
+        id: tag
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_TAG: ${{ inputs.tag }}
+          REF: ${{ github.ref }}
+        run: |
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            echo "name=$INPUT_TAG" >> "$GITHUB_OUTPUT"
+          else
+            echo "name=${REF#refs/tags/}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Download artifacts
+        uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16 # v4.1.8
+        with:
+          path: artifacts
+          pattern: zhhz-*
+          merge-multiple: true
+
+      - name: List artifacts
+        run: ls -la artifacts
+
+      - name: Generate SHA256SUMS
+        run: |
+          cd artifacts
+          sha256sum *.tar.xz > SHA256SUMS
+          cd ..
+          cat artifacts/SHA256SUMS
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@dc72c7d5c4d10cd6bcb8cf6e3fd625a9e5e537da # v3.7.0
+
+      - name: Sign release artifacts
+        run: |
+          for f in artifacts/*.tar.xz artifacts/SHA256SUMS; do
+            [ -f "$f" ] || continue
+            cosign sign-blob --yes --bundle="${f}.sigstore.json" "$f"
+          done
+
+      - name: Create Release
+        uses: softprops/action-gh-release@c95fe1489396fe8a9eb87c0abf8aa5b2ef267fda # v2.2.1
+        with:
+          tag_name: ${{ steps.tag.outputs.name }}
+          name: ${{ steps.tag.outputs.name }}
+          generate_release_notes: true
+          files: |
+            artifacts/*.tar.xz
+            artifacts/SHA256SUMS
+            artifacts/*.sigstore.json
+
+  publish-crates:
+    name: Publish to crates.io
+    needs: release
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+
+      - name: Setup Rust
+        uses: actions-rust-lang/setup-rust-toolchain@4d1965c9142484e48d40c19de54b5cba84953a06 # v1.10.0
+        # toolchain channel is pinned in rust-toolchain.toml for reproducible builds
+
+      - name: Publish
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: cargo publish --locked
