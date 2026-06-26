@@ -9,7 +9,7 @@
 //! ```
 
 use std::io::{Read, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 
@@ -33,8 +33,15 @@ OPTIONS:
         --from <REGION>     Source script region (alternative to --config).
         --to   <REGION>     Target script region (requires --from).
                              Regions: cn-s cn-t cn-tw cn-hk jp-t jp-n
+        --auto              Detect each input's script variant and convert
+                             it to Simplified (cn-s). For Japanese input,
+                             runs a 2-stage pipeline (jp2t then t2s).
         --dict <FILE>       Custom dictionary (TSV: key<TAB>value), highest
                              priority. May be repeated. '#' lines are ignored.
+        --files-from <PATH|->  Read a newline-separated list of paths from
+                             a file or stdin ('-'). Directories are walked
+                             recursively.
+    -0, --null              With --files-from, paths are NUL-separated.
     -i, --in-place          Rewrite each input FILE in place (not stdin).
     -l, --list              List regions and supported conversions.
     -h, --help              Show this help.
@@ -42,10 +49,10 @@ OPTIONS:
 
 EXAMPLES:
     echo '汉字' | zhhz --from cn-s --to cn-t      # 漢字
-    echo '汉字' | zhhz --from cn-s --to cn-tw     # 資訊-style Taiwan phrases
     echo '鼠标' | zhhz --from cn-s --to cn-tw     # 滑鼠
-    echo '漢字' | zhhz --from cn-tw --to cn-s     # simplified
+    echo '万与两' | zhhz --auto                   # detect -> Simplified
     zhhz -c s2t --dict mywords.txt input.txt      # legacy --config form
+    cat urls.txt | zhhz --files-from -            # chardet-style batch
 ";
 
 pub struct Cli {
@@ -56,6 +63,9 @@ pub struct Cli {
     pub in_place: bool,
     pub list: bool,
     pub files: Vec<PathBuf>,
+    pub auto: bool,
+    pub files_from: Option<PathBuf>,
+    pub null: bool,
 }
 
 enum Action {
@@ -73,6 +83,9 @@ fn parse_args(argv: Vec<String>) -> Result<Action> {
         in_place: false,
         list: false,
         files: Vec::new(),
+        auto: false,
+        files_from: None,
+        null: false,
     };
     let mut args = argv.into_iter().skip(1).peekable();
     while let Some(arg) = args.next() {
@@ -81,6 +94,11 @@ fn parse_args(argv: Vec<String>) -> Result<Action> {
             "-V" | "--version" => return Ok(Action::Version),
             "-l" | "--list" => cli.list = true,
             "-i" | "--in-place" => cli.in_place = true,
+            "--auto" => cli.auto = true,
+            "-0" | "--null" => cli.null = true,
+            "--files-from" => {
+                cli.files_from = Some(PathBuf::from(take_value(&mut args, "--files-from")?));
+            }
             "-c" | "--config" => {
                 cli.config = Some(take_value(&mut args, "--config")?);
             }
@@ -104,11 +122,15 @@ fn parse_args(argv: Vec<String>) -> Result<Action> {
                     "--from" => cli.from = Some(take_owned_value(flag, val)?),
                     "--to" => cli.to = Some(take_owned_value(flag, val)?),
                     "--dict" => cli.dicts.push(PathBuf::from(take_owned_value(flag, val)?)),
-                    "--in-place" | "--list" => {
+                    "--auto" | "--in-place" | "--list" => {
                         if val.is_some() {
                             return Err(anyhow::anyhow!("option {flag} does not take a value"));
                         }
                     }
+                    "--files-from" => {
+                        cli.files_from = Some(PathBuf::from(take_owned_value(flag, val)?));
+                    }
+                    s if s == "-0" || s == "--null" => {} // handled by the other branch
                     _ => return bail_unknown(other),
                 }
             }
@@ -176,6 +198,95 @@ pub fn run() -> Result<()> {
     }
 }
 
+/// Resolve the chardet-style input set:
+///
+/// * `--files-from <PATH|->` reads a newline-separated (or NUL-separated
+///   with `-0`) list of paths from a file or from stdin.
+/// * Positional arguments are treated as files; directories are walked
+///   recursively (regular files only, sorted).
+/// * `-` (anywhere) means "read content from stdin"; multiple `-` collapse
+///   into a single stdin read.
+///
+/// Returns `(path, content)` per input. For files the content is read
+/// eagerly. For stdin (path == `-`) the content string is empty; the caller
+/// must read stdin exactly once when it encounters this entry.
+fn resolve_convert_inputs(cli: &Cli) -> Result<Vec<(PathBuf, String)>> {
+    let mut paths: Vec<PathBuf> = cli.files.clone();
+    if let Some(src) = &cli.files_from {
+        let raw = if src == &PathBuf::from("-") {
+            let mut buf = Vec::new();
+            std::io::stdin()
+                .read_to_end(&mut buf)
+                .context("read stdin")?;
+            buf
+        } else {
+            std::fs::read(src).with_context(|| format!("read file list {}", src.display()))?
+        };
+        let sep: u8 = if cli.null { 0 } else { b'\n' };
+        for chunk in raw.split(|&b| b == sep) {
+            let s = String::from_utf8_lossy(chunk).trim().to_string();
+            if s.is_empty() {
+                continue;
+            }
+            paths.push(PathBuf::from(s));
+        }
+    }
+    let mut out: Vec<(PathBuf, String)> = Vec::new();
+    let mut stdin_seen = false;
+    for p in &paths {
+        if p == &PathBuf::from("-") {
+            if !stdin_seen {
+                out.push((PathBuf::from("-"), String::new()));
+                stdin_seen = true;
+            }
+            continue;
+        }
+        if p.is_dir() {
+            for entry in walk_dir(p)? {
+                let data = std::fs::read_to_string(&entry)
+                    .with_context(|| format!("read {}", entry.display()))?;
+                out.push((entry, data));
+            }
+        } else {
+            let data =
+                std::fs::read_to_string(p).with_context(|| format!("read {}", p.display()))?;
+            out.push((p.clone(), data));
+        }
+    }
+    if out.is_empty() {
+        out.push((PathBuf::from("-"), String::new()));
+    }
+    Ok(out)
+}
+
+fn walk_dir(dir: &Path) -> Result<Vec<PathBuf>> {
+    let mut files = Vec::new();
+    let mut stack = vec![dir.to_path_buf()];
+    while let Some(p) = stack.pop() {
+        for entry in std::fs::read_dir(&p).with_context(|| format!("read_dir {}", p.display()))? {
+            let entry = entry.with_context(|| format!("read_dir entry in {}", p.display()))?;
+            let ft = entry.file_type().with_context(|| "file_type")?;
+            if ft.is_dir() {
+                stack.push(entry.path());
+            } else if ft.is_file() {
+                files.push(entry.path());
+            }
+        }
+    }
+    files.sort();
+    Ok(files)
+}
+
+fn write_one(path: &Path, content: &str, cli: &Cli) -> Result<()> {
+    if cli.in_place && path.as_os_str() != "-" {
+        std::fs::write(path, content.as_bytes())
+            .with_context(|| format!("failed to write {}", path.display()))?;
+    } else {
+        write_all_stdout(content)?;
+    }
+    Ok(())
+}
+
 fn resolve_config(cli: &Cli) -> Result<Config> {
     if let (Some(from), Some(to)) = (cli.from.as_deref(), cli.to.as_deref()) {
         let f = Region::parse(from).map_err(|e| anyhow::anyhow!("invalid --from: {e}"))?;
@@ -194,35 +305,56 @@ fn run_cli(cli: Cli) -> Result<()> {
         return Ok(());
     }
 
-    let config = resolve_config(&cli)?;
     let custom = load_custom_dicts(&cli.dicts)?;
-    let converter = Converter::with_custom(config, &custom);
 
-    let read_stdin = cli.files.is_empty() || cli.files.iter().any(|f| f == &PathBuf::from("-"));
+    // Gather inputs: positional files, plus any from --files-from, with dirs
+    // walked recursively (chardet pattern). `None` in the returned Vec means
+    // "read content from stdin once" (a single placeholder, even if `-`
+    // appears multiple times).
+    let inputs = resolve_convert_inputs(&cli)?;
 
-    if read_stdin && !cli.in_place {
-        let mut input = String::new();
-        std::io::stdin()
-            .lock()
-            .read_to_string(&mut input)
-            .context("failed to read stdin")?;
-        write_all_stdout(&converter.convert(&input))?;
+    if cli.auto {
+        // --auto: detect each input's script variant and convert it to
+        // Simplified (cn-s). Each region's direct-to-cn-s config is used;
+        // for jp-n (shinjitai) a 2-stage pipeline jp2t → t2s is required.
+        let t2s = Converter::with_custom(Config::T2s, &custom);
+        let tw2sp = Converter::with_custom(Config::Tw2sp, &custom);
+        let hk2sp = Converter::with_custom(Config::Hk2sp, &custom);
+        let jp2t = Converter::with_custom(Config::Jp2t, &custom);
+        for (path, mut content) in inputs {
+            if path == std::path::Path::new("-") && content.is_empty() {
+                std::io::stdin()
+                    .lock()
+                    .read_to_string(&mut content)
+                    .context("failed to read stdin")?;
+            }
+            let det = crate::detect::detect_text(&content);
+            let out = match det.map(|d| d.region) {
+                Some(Region::CnS) => content,
+                Some(Region::CnT) => t2s.convert(&content),
+                Some(Region::CnTw) => tw2sp.convert(&content),
+                Some(Region::CnHk) => hk2sp.convert(&content),
+                Some(Region::JpN) => t2s.convert(&jp2t.convert(&content)),
+                Some(Region::JpT) => t2s.convert(&content),
+                None => content, // unknown: pass through
+            };
+            write_one(&path, &out, &cli)?;
+        }
         return Ok(());
     }
 
-    for file in &cli.files {
-        if file == &PathBuf::from("-") {
-            continue;
+    let config = resolve_config(&cli)?;
+    let converter = Converter::with_custom(config, &custom);
+
+    for (path, mut content) in inputs {
+        if path == std::path::Path::new("-") && content.is_empty() {
+            std::io::stdin()
+                .lock()
+                .read_to_string(&mut content)
+                .context("failed to read stdin")?;
         }
-        let input = std::fs::read_to_string(file)
-            .with_context(|| format!("failed to read {}", file.display()))?;
-        let output = converter.convert(&input);
-        if cli.in_place {
-            std::fs::write(file, output.as_bytes())
-                .with_context(|| format!("failed to write {}", file.display()))?;
-        } else {
-            write_all_stdout(&output)?;
-        }
+        let output = converter.convert(&content);
+        write_one(&path, &output, &cli)?;
     }
     Ok(())
 }

@@ -148,6 +148,50 @@ fn load_signatures() -> &'static Signatures {
     })
 }
 
+// Regional phrase sets — the **values** (regional-traditional forms) of
+// TWPhrases / HKPhrases. A substring hit is a strong indicator that the
+// input belongs to that region (e.g. "軟體" or "滑鼠" → Taiwan;
+// "伊利諾" → Hong Kong). Using values, not keys, is important because
+// the keys of TWPhrases are Simplified forms ("软件", "信息") that also
+// appear in plain Simplified text and would produce false positives. Lazy
+// via OnceLock so the first detect_text call pays the parse cost and
+// subsequent calls reuse.
+static TW_PHRASES: OnceLock<Vec<String>> = OnceLock::new();
+static HK_PHRASES: OnceLock<Vec<String>> = OnceLock::new();
+
+fn tw_phrases() -> &'static [String] {
+    TW_PHRASES.get_or_init(|| load_values_from("TWPhrases"))
+}
+fn hk_phrases() -> &'static [String] {
+    HK_PHRASES.get_or_init(|| load_values_from("HKPhrases"))
+}
+
+/// Load the first (regional-traditional) value of each line of a phrase
+/// dictionary. Lines without a tab or without a value are skipped, and
+/// single-character values are dropped: a 1-char "phrase" produces far too
+/// many false positives (e.g. an HK value `與` would match almost any
+/// traditional text). Regional phrases are multi-character in practice.
+fn load_values_from(name: &str) -> Vec<String> {
+    let Some(text) = data::dict_text(name) else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    for line in text.lines() {
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let Some((_key, vals)) = line.split_once('\t') else {
+            continue;
+        };
+        if let Some(first) = vals.split_whitespace().next() {
+            if first.chars().count() >= 2 {
+                out.push(first.to_string());
+            }
+        }
+    }
+    out
+}
+
 fn is_cjk(ch: char) -> bool {
     matches!(ch, '\u{4E00}'..='\u{9FFF}')
 }
@@ -223,6 +267,41 @@ pub fn detect_text(text: &str) -> Option<Detection> {
     }
 
     // Chinese branch.
+    // Use **region-exclusive** phrases (TW values not in HK's value set, and
+    // vice versa) to disambiguate. Many regional phrases overlap (`滑鼠`,
+    // `伊利諾` are used in both Taiwan and Hong Kong) — counting them as
+    // signal produces false positives. Scoring by total matched characters
+    // of the exclusive sets gives the longer, more specific phrases
+    // appropriate weight.
+    let tw_phrases = tw_phrases();
+    let hk_phrases = hk_phrases();
+    let hk_set: HashSet<&str> = hk_phrases.iter().map(|s| s.as_str()).collect();
+    let tw_set: HashSet<&str> = tw_phrases.iter().map(|s| s.as_str()).collect();
+    let tw_total_chars: usize = tw_phrases
+        .iter()
+        .filter(|p| !hk_set.contains(p.as_str()))
+        .filter(|p| text.contains(p.as_str()))
+        .map(|p| p.chars().count())
+        .sum();
+    let hk_total_chars: usize = hk_phrases
+        .iter()
+        .filter(|p| !tw_set.contains(p.as_str()))
+        .filter(|p| text.contains(p.as_str()))
+        .map(|p| p.chars().count())
+        .sum();
+    if tw_total_chars > hk_total_chars && tw_total_chars > 0 {
+        return Some(Detection {
+            region: Region::CnTw,
+            confidence: pct(cn_t + cn_tw, total_cjk).max(50),
+        });
+    }
+    if hk_total_chars > tw_total_chars && hk_total_chars > 0 {
+        return Some(Detection {
+            region: Region::CnHk,
+            confidence: (pct(cn_t + cn_hk, total_cjk)).max(50),
+        });
+    }
+
     if cn_s > cn_t + cn_tw + cn_hk {
         return Some(Detection {
             region: Region::CnS,
@@ -496,9 +575,17 @@ mod tests {
 
     #[test]
     fn regional_taiwan_signature() {
-        // 滑鼠 (TW term) signals cn-tw. 鼠 is a TWVariants key.
-        let d = detect_text("滑鼠與電腦").expect("has CJK");
-        assert!(matches!(d.region, Region::CnTw | Region::CnT));
+        // "A型肝炎" is a TW-exclusive phrase (not in HK's value set).
+        let d = detect_text("他感染了A型肝炎").expect("has CJK");
+        assert_eq!(d.region, Region::CnTw);
+    }
+
+    #[test]
+    fn regional_hk_signature() {
+        // "西維珍尼亞州" is an HK-exclusive phrase (Hong Kong uses
+        // 維吉尼亞/西維 for Virginia, while Taiwan uses 弗吉尼亞/西弗).
+        let d = detect_text("他去了西維珍尼亞州").expect("has CJK");
+        assert_eq!(d.region, Region::CnHk);
     }
 
     #[test]

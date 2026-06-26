@@ -20,6 +20,27 @@ OpenCC is the de-facto Chinese-conversion library, but its reference implementat
 - **Supports custom conversion words** at the highest priority, for terminology, branding, or domain vocabulary.
 - **Tracks upstream data** via a pinned, reproducible sync script (`scripts/sync-opencc.sh`).
 
+## Designed for AI agents
+
+`zhhz` is built first and foremost for **AI agents** (Claude, Cursor, custom
+LLM pipelines, batch jobs). The CLI is deliberately minimal:
+
+- **No TUI, no progress bars, no spinners.** Output is plain text on stdout;
+  errors go to stderr. An agent can capture both and parse deterministically.
+- **stdin / stdout friendly.** Pipe text in, get text out. Files are positional
+  arguments; `-` means stdin.
+- **Stable, predictable, safe.** Same input → byte-identical output every time.
+  No network, no filesystem writes unless asked (`--in-place`), no temp
+  files, no background processes.
+- **Batch / filelist from stdin** (chardet-style): `<files>...`,
+  `--files-from <PATH|->`, `-0` / `--null`, recursive directory walking.
+- **Single self-contained binary.** No native deps, no data files to ship
+  alongside. Drop it in a container and it just works.
+
+If you want a fancy interactive experience, this is the wrong tool — use
+OpenCC or a web demo. If you want a thing you can shell out to from a script
+or hand to an agent, this is it.
+
 ## Install
 
 ### Cargo
