@@ -1,0 +1,15 @@
+# Vendored from BYVoid/OpenCC at build time. Do not edit by hand.
+# Re-vendor with: scripts/sync-opencc.sh [ref]  (default: master)
+repo:    https://github.com/BYVoid/OpenCC
+commit:  cf0e4b6c0e0ec4c9f55a3a5884ba8c292dbe5489
+branch:  master
+date:    2026-06-26
+license: Apache-2.0 (code + dictionary data; see data/dictionary headers and root LICENSE)
+contents:
+  data/dictionary/*.txt  - 17 OpenCC source dictionaries (unchanged)
+  data/config/*.json     - 16 conversion configs + opencc_config.schema.json
+derived at build time (build.rs -> OUT_DIR, not committed):
+  TSCharactersExt.txt                          <- extract_tofu_risk(TSCharacters.txt)
+  TWVariantsRev.txt / HKVariantsRev.txt        <- reverse(TW|HKVariants.txt)
+  JPShinjitaiCharactersRev.txt                 <- reverse(JPShinjitaiCharacters.txt)
+  STPhrases_GeneratedFromRegionalPhrases.txt   <- t2s(HKPhrases+TWPhrases keys)

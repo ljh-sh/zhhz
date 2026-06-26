@@ -1,0 +1,66 @@
+
+#!/usr/bin/env sh
+
+set -e
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+. "$SCRIPT_DIR/release-rust.common.sh"
+
+BIN_NAME="${BIN_NAME:-zhhz}"
+init_common
+
+parse_args() {
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --zigbuild-first)
+                BUILD_MODE="zigbuild-first"
+                ;;
+            --native-first)
+                BUILD_MODE="native-first"
+                ;;
+            all)
+                build_all_targets
+                ;;
+            win-x64|x86_64-pc-windows-gnu)
+                do_build "x86_64-pc-windows-gnu" "win" "x64"
+                ;;
+            win-arm64|aarch64-pc-windows-gnullvm)
+                do_build "aarch64-pc-windows-gnullvm" "win" "arm64"
+                ;;
+            darwin-x64|x86_64-apple-darwin)
+                do_build "x86_64-apple-darwin" "darwin" "x64"
+                ;;
+            darwin-arm64|aarch64-apple-darwin)
+                do_build "aarch64-apple-darwin" "darwin" "arm64"
+                ;;
+            linux-x64|x86_64-unknown-linux-musl)
+                do_build "x86_64-unknown-linux-musl" "linux" "x64"
+                ;;
+            linux-arm64|aarch64-unknown-linux-musl)
+                do_build "aarch64-unknown-linux-musl" "linux" "arm64"
+                ;;
+            freebsd-x64|x86_64-unknown-freebsd)
+                do_build "x86_64-unknown-freebsd" "freebsd" "x64"
+                ;;
+            freebsd-i686|i686-unknown-freebsd)
+                do_build "i686-unknown-freebsd" "freebsd" "i686"
+                ;;
+            -h|--help)
+                show_usage
+                exit 0
+                ;;
+            *)
+                echo "Unknown option: $1"
+                show_usage
+                exit 1
+                ;;
+        esac
+        shift
+    done
+
+    if [ $# -eq 0 ]; then
+        build_all_targets
+    fi
+}
+
+parse_args "$@"
