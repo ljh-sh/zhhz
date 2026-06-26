@@ -56,6 +56,35 @@ zhhz --list                             # 列出全部配置
 
 配置名与 OpenCC 一致：`s2t` / `t2s`、`s2tw` / `tw2s`、`s2twp` / `tw2sp`、`s2hk` / `hk2s`、`s2hkp` / `hk2sp`、`t2tw` / `tw2t`、`t2hk` / `hk2t`、`t2jp` / `jp2t`。
 
+或使用语义化区域标志（`--from` / `--to`）：
+
+```bash
+echo '汉字'   | zhhz --from cn-s --to cn-t      # 漢字
+echo '信息'   | zhhz --from cn-s --to cn-tw     # 資訊（台湾短语）
+echo '鼠标'   | zhhz --from cn-s --to cn-tw     # 滑鼠
+echo '漢字'   | zhhz --from cn-tw --to cn-s     # 简体
+echo '万与两' | zhhz --from jp-n --to cn-t      # 萬與兩
+```
+
+区域代码：`cn-s` / `cn-t` / `cn-tw` / `cn-hk` / `jp-t` / `jp-n`。
+
+### 检测中文文本的简繁/地区变体
+
+```bash
+echo '汉字计算机软件' | zhhz detect          # cn-s    57   -
+echo '漢字計算機軟體' | zhhz detect          # cn-t    66   -
+echo 'こんにちは世界' | zhhz detect          # jp-n    50   -
+zhhz detect corpus.txt                      # cn-s    ...  corpus.txt
+zhhz detect                                 # 从 stdin 读取内容检测
+```
+
+输出为 tab 分隔：`<region>\t<confidence>\t<path>`。置信度 0–100
+（输入中特征字符的占比）。区域代码同上述六种；若不含 CJK 字符或假名则为 `unknown`。
+
+`zhhz detect` 镜像 [`chardet`](https://github.com/ljh-sh/chardet) 的 CLI：
+`<files>...` 检测每个路径；`-`（或不传参）从 stdin 读**内容**检测；`--files-from <PATH|->`
+从文件/标准输入读换行分隔的路径列表；`-0` / `--null` 为 NUL 分隔；目录递归遍历。
+
 ### 自定义词典
 
 自定义词典是 TSV 文件（`key<TAB>value`），`#` 开头的行被忽略。条目以最高优先级覆盖内置词表：

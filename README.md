@@ -7,7 +7,7 @@
 
 > Self-contained Simplified/Traditional Chinese converter — a pure-Rust, data-embedded reimplementation of [OpenCC](https://github.com/BYVoid/OpenCC).
 
-`zhhz` converts between Simplified and Traditional Chinese (plus Taiwan, Hong Kong, and Japanese-shinjitai variants) using the OpenCC dictionaries. **All dictionaries are embedded in the binary at compile time** — one ~1.6 MB static binary, no runtime download, no separate data directory.
+`zhhz` converts between Simplified and Traditional Chinese (plus Taiwan, Hong Kong, and Japanese-shinjitai variants) using the OpenCC dictionaries, and detects the script variant of Chinese text. **All dictionaries are embedded in the binary at compile time** — one ~1.7 MB static binary, no runtime download, no separate data directory.
 
 The name is a palindrome: **zh** hanzi, and **z**huan **h**uan **h**an **z**i (转换汉字, "convert Chinese characters").
 
@@ -68,6 +68,37 @@ Configs (mirrors OpenCC):
 | `t2tw` / `tw2t` | Traditional (standard) ↔ Taiwan |
 | `t2hk` / `hk2t` | Traditional (standard) ↔ Hong Kong |
 | `t2jp` / `jp2t` | Japanese Kyūjitai ↔ Shinjitai |
+
+Or use semantic region flags (`--from` / `--to`):
+
+```bash
+echo '汉字'   | zhhz --from cn-s --to cn-t      # 漢字
+echo '信息'   | zhhz --from cn-s --to cn-tw     # 資訊 (Taiwan phrases)
+echo '鼠标'   | zhhz --from cn-s --to cn-tw     # 滑鼠
+echo '漢字'   | zhhz --from cn-tw --to cn-s     # simplified
+echo '万与两' | zhhz --from jp-n --to cn-t      # 萬與兩
+```
+
+Regions: `cn-s` / `cn-t` / `cn-tw` / `cn-hk` / `jp-t` / `jp-n`.
+
+### Detect the script variant of Chinese text
+
+```bash
+echo '汉字计算机软件' | zhhz detect          # cn-s    57   -
+echo '漢字計算機軟體' | zhhz detect          # cn-t    66   -
+echo 'こんにちは世界' | zhhz detect          # jp-n    50   -
+zhhz detect corpus.txt                      # cn-s    ...  corpus.txt
+zhhz detect                                 # detect content piped on stdin
+```
+
+Output is tab-separated: `<region>\t<confidence>\t<path>`. Confidence is 0–100
+(share of signature characters in the input). Region codes are the same six
+listed above, or `unknown` when there are no CJK characters / kana.
+
+`zhhz detect` mirrors [`chardet`](https://github.com/ljh-sh/chardet)'s CLI:
+`<files>...` to detect each path, `-` (or no args) to detect stdin content,
+`--files-from <PATH|->` to read a newline-separated list of paths, `-0` /
+`--null` for NUL-separated lists, and recursive directory walking.
 
 ### Custom dictionaries
 
