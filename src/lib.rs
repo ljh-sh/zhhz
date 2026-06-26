@@ -23,11 +23,13 @@
 pub mod cli;
 pub mod config;
 pub mod data;
+pub mod detect;
 pub mod dict;
 pub mod engine;
 
+pub use detect::{detect_bytes, detect_text, Detection};
 pub use dict::Dict;
-pub use engine::{Config, Converter};
+pub use engine::{Config, Converter, Region};
 
 /// The default conversion config used when `--config` is omitted.
 pub const DEFAULT_CONFIG: &str = "s2t";
