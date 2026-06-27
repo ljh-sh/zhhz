@@ -487,22 +487,67 @@ fn convert_segment(
     out.clear();
     out.reserve(segment.len() + segment.len() / 5);
     let mut pos = 0;
-    while pos < segment.len() {
-        let rest = &segment[pos..];
-        // Fast path: no n-gram model loaded, so we never need the
-        // candidates Vec that `group_longest_prefix_multi` allocates on
-        // every match. The cheap `group_longest_prefix` returns
-        // `&str` directly — zero allocation per FMM match.
-        // (zhhz#14: this restores v0.6 fast-path throughput.)
-        if ngram.is_none() {
+    // **perf (#1)**: SIMD ASCII pass-through. For segments that
+    // start with ASCII, scan to the next non-ASCII byte and bulk-
+    // copy the ASCII run. For Chinese-leading segments, fall through
+    // to the regular char walk (avoids the byte-by-byte scan cost
+    // for pure-Chinese segments where every char is multi-byte).
+    if ngram.is_none() {
+        let bytes = segment.as_bytes();
+        if !bytes.is_empty() && bytes[0] < 0x80 {
+            // ASCII-leading segment: SIMD-style fast path.
+            while pos < bytes.len() {
+                let rest = &bytes[pos..];
+                let ascii_end = find_non_ascii(rest);
+                if ascii_end > 0 {
+                    let ascii_run = &rest[..ascii_end];
+                    debug_assert!(ascii_run.is_ascii());
+                    let old_len = out.len();
+                    let new_len = old_len + ascii_run.len();
+                    if new_len > out.capacity() {
+                        out.reserve(new_len - old_len);
+                    }
+                    // SAFETY: ascii_run is valid ASCII subset of UTF-8.
+                    unsafe {
+                        let dst = out.as_mut_vec().as_mut_ptr().add(old_len);
+                        std::ptr::copy_nonoverlapping(
+                            ascii_run.as_ptr(),
+                            dst,
+                            ascii_run.len(),
+                        );
+                        out.as_mut_vec().set_len(new_len);
+                    }
+                    pos += ascii_end;
+                    if pos >= bytes.len() {
+                        break;
+                    }
+                }
+                let rest = &bytes[pos..];
+                let rest_str: &str = unsafe { std::str::from_utf8_unchecked(rest) };
+                if let Some((key_len, value)) = group_longest_prefix(group, rest_str) {
+                    if value.is_ascii() {
+                        unsafe_push_str_ascii(out, value);
+                    } else {
+                        out.push_str(value);
+                    }
+                    pos += key_len;
+                    continue;
+                }
+                let ch_len = rest_str
+                    .chars()
+                    .next()
+                    .map(|c| c.len_utf8())
+                    .unwrap_or_else(|| rest_str.len().min(4));
+                out.push_str(&rest_str[..ch_len]);
+                pos += ch_len;
+            }
+            return String::new();
+        }
+        // Chinese-leading segment: fall through to char walk below
+        // (the existing fast path that uses `group_longest_prefix`).
+        while pos < segment.len() {
+            let rest = &segment[pos..];
             if let Some((key_len, value)) = group_longest_prefix(group, rest) {
-                // **perf (zhhz#24, N)**: when value is ASCII, use a
-                // bulk byte copy via `extend_from_slice`. For ASCII
-                // sources, this avoids the UTF-8 validation pass that
-                // `String::push_str` performs internally. The bytes
-                // come from a Dict's `String` which is guaranteed
-                // valid UTF-8, and `value.is_ascii()` guarantees
-                // each byte is < 0x80 (no multi-byte chars).
                 if value.is_ascii() {
                     unsafe_push_str_ascii(out, value);
                 } else {
@@ -518,8 +563,12 @@ fn convert_segment(
                 .unwrap_or_else(|| rest.len().min(4));
             out.push_str(&rest[..ch_len]);
             pos += ch_len;
-            continue;
         }
+        return String::new();
+    }
+    // Disambig path (ngram.is_some()): fall through to the loop below.
+    while pos < segment.len() {
+        let rest = &segment[pos..];
         // Disambig path: multi-value exposure needed for n-gram lookup.
         if let Some((key_len, cands)) = group_longest_prefix_multi(group, rest) {
             if cands.len() > 1 {
@@ -626,6 +675,25 @@ fn tail_2_chars(s: &str) -> String {
     } else {
         s[start..].to_string()
     }
+}
+
+/// Find the first byte ≥ 0x80 in `bytes`. Returns the index, or
+/// `bytes.len()` if none. For Chinese text, lead bytes are
+/// 0xE0-0xEF and continuation bytes are 0x80-0xBF; any of these
+/// (≥ 0x80) means we've left the ASCII run.
+///
+/// Note: this is a 1-byte-at-a-time loop. For a true SIMD scan,
+/// use `memchr::memchr3(0x80, 0xC0, 0xE0, ...)` or the
+/// `safe_arch` crate's NEON/x86 SSE2 intrinsics. We use the simple
+/// loop here for portability and to keep the PoC small.
+#[inline]
+fn find_non_ascii(bytes: &[u8]) -> usize {
+    for (i, &b) in bytes.iter().enumerate() {
+        if b >= 0x80 {
+            return i;
+        }
+    }
+    bytes.len()
 }
 
 /// SAFETY: caller must guarantee `value.is_ascii()`. Under that

@@ -219,6 +219,7 @@ version = "0.7.3"
 dependencies = [
  "anyhow",
  "js-sys",
+ "memchr",
  "serde_json",
  "wasm-bindgen",
 ]

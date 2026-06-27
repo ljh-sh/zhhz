@@ -43,6 +43,7 @@ serde_json = "1"
 # WebAssembly bindings (only pulled in with --features wasm).
 wasm-bindgen = { version = "0.2", optional = true }
 js-sys = { version = "0.3", optional = true }
+memchr = "2.8.2"
 
 [features]
 # Build the WebAssembly bindings (used by `cargo build --target
