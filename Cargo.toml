@@ -1,6 +1,6 @@
 [package]
 name = "zhhz"
-version = "0.7.0"
+version = "0.7.1"
 authors = ["ljh-sh <lijunhao@x-cmd.com>"]
 edition = "2021"
 rust-version = "1.74"
