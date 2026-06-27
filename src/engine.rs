@@ -578,15 +578,13 @@ fn convert_segment(
         }
     }
     // Truncate the running prev to the last 2 chars to bound memory.
-    // **perf (zhhz#21, I)**: previous code did `out.chars().rev().take(2)
-    // .collect::<Vec<char>>().into_iter().rev().collect::<String>()`,
-    // which allocates a `Vec<char>` (8 bytes/elem) AND a fresh `String`
-    // for every single segment — ~700K extra allocations per 10 MB
-    // input in the fast path. macOS Instruments confirmed these as the
-    // dominant allocator traffic. Replaced with byte-level slicing
-    // (`str::char_indices` to find the last-2-char prefix) which
-    // allocates nothing.
-    let keep: String = if prev_emit.is_empty() {
+    // **perf (zhhz#21, I+K)**: in fast mode (ngram.is_none()), the
+    // caller never reads `keep`; return an empty String without
+    // computing tail_2_chars (saves the alloc + the slice walk).
+    // In disambig mode, prev_emit is still needed for ngram lookup.
+    let keep: String = if ngram.is_none() {
+        String::new()
+    } else if prev_emit.is_empty() {
         tail_2_chars(&out)
     } else {
         let mut combined = String::with_capacity(prev_emit.len() + out.len());
