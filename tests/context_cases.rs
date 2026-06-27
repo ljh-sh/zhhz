@@ -133,3 +133,21 @@ fn known_limitation_戏出了一半() {
     let got_bigram = s2t_bigram("戏出了一半");
     assert_eq!(got_bigram, "戲出了一半");
 }
+
+// --- Semantic disambig: 齣 is the measure word (a show), 出 is the verb
+//     (depart, issue, break character, etc.). Both readings of "出戏" are
+//     valid Mandarin, but only one fits the surrounding context. ---
+
+#[test]
+fn ngram_演员出戏了_verb() {
+    // 演员出戏了 = "the actor broke character" (出 as verb).
+    // NOT "演員齣戲了" which would be ungrammatical.
+    // The n-gram has no P(出|員) / P(齣|員) entries, so the disambig
+    // falls back to the dict's first candidate "出" — which happens to
+    // be the right answer here.
+    let got = s2t_bigram("演员出戏了");
+    assert_eq!(got, "演員出戲了");
+    // Also assert --fast gets the same right answer (the cands[0] = 出).
+    let got_fast = s2t("演员出戏了");
+    assert_eq!(got_fast, "演員出戲了");
+}
