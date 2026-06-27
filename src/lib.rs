@@ -33,7 +33,7 @@ pub mod wasm;
 
 pub use detect::{detect_bytes, detect_text, Detection};
 pub use dict::Dict;
-pub use engine::{Config, Converter, NgramMode, Region};
+pub use engine::{AmbiguousDecision, Config, Converter, NgramMode, Region};
 pub use ngram::NgramModel;
 
 /// The default conversion config used when `--config` is omitted.
