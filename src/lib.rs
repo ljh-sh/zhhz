@@ -28,11 +28,22 @@ pub mod dict;
 pub mod engine;
 pub mod ngram;
 
+#[cfg(all(feature = "marisa", not(feature = "wasm")))]
+pub mod dict_marisa;
+
 #[cfg(feature = "wasm")]
 pub mod wasm;
 
-pub use detect::{detect_bytes, detect_text, Detection};
+// When the `marisa` feature is on, the public `Dict` is the rsmarisa-backed
+// implementation. Engine + config reference `Dict` and are unaware of the
+// swap. WASM always uses the in-house trie (rsmarisa would link extra code
+// into the WASM blob; we keep WASM lean).
+#[cfg(all(feature = "marisa", not(feature = "wasm")))]
+pub use dict_marisa::MarisaDict as Dict;
+#[cfg(not(all(feature = "marisa", not(feature = "wasm"))))]
 pub use dict::Dict;
+
+pub use detect::{detect_bytes, detect_text, Detection};
 pub use engine::{Config, Converter, NgramMode, Region};
 pub use ngram::NgramModel;
 
