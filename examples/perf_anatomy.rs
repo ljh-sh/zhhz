@@ -1,5 +1,7 @@
 // Detailed perf anatomy: separate build phase from hot loop.
 //
+// Usage: cargo run --release --example perf_anatomy [fast|bigram|trigram]
+//
 // 1. Build phase (trie construction)
 // 2. Hot loop (convert 10 MB realistic corpus, 30 runs)
 // 3. Per-char cost: total time / char count
@@ -7,9 +9,10 @@
 //
 // Run with /usr/bin/time -l to also get instruction/cycle counts.
 use std::time::Instant;
-use zhhz::{Config, Converter};
+use zhhz::{Config, Converter, NgramMode, NgramModel};
 
 fn main() {
+    let arg_mode = std::env::args().nth(1).unwrap_or_else(|| "fast".to_string());
     let base = "汉字计算机软件繁体网络数据库服务器汉字字符串格式输出输入文件目录路径\
         系统应用软件程序代码语言框架结构算法数据结构类型变量函数参数返回值\
         用户界面交互设计模式实现机制原理方法技巧经验总结归纳推理演绎证明反证\
@@ -20,11 +23,25 @@ fn main() {
     }
     let char_count = text.chars().count();
     let byte_count = text.len();
-    eprintln!("corpus: {} bytes, {} chars", byte_count, char_count);
+    eprintln!("mode: {} | corpus: {} bytes, {} chars", arg_mode, byte_count, char_count);
 
     // Phase 1: build (cold start)
     let build_start = Instant::now();
-    let c = Converter::new(Config::S2t);
+    let mut c = Converter::new(Config::S2t);
+    if arg_mode != "fast" {
+        let model_path = match arg_mode.as_str() {
+            "trigram" => "/tmp/ngram-out/3gram.arpa",
+            _ => "/tmp/ngram-out/2gram.arpa",
+        };
+        let model = NgramModel::from_file(model_path)
+            .expect("ngram model required for bigram/trigram");
+        let mode = match arg_mode.as_str() {
+            "bigram" => NgramMode::Bigram,
+            "trigram" => NgramMode::Trigram,
+            _ => unreachable!(),
+        };
+        c = c.with_ngram(model, mode);
+    }
     let build_elapsed = build_start.elapsed();
     eprintln!("build (cold, 1 Converter): {:.2} ms", build_elapsed.as_secs_f64() * 1000.0);
 
