@@ -30,31 +30,6 @@ pub enum NgramMode {
     Trigram,
 }
 
-/// One record of a multi-value match in the source text. Emitted in
-/// `ConvertReport`. This is the **detection** half of an LLM
-/// post-process pipeline: it surfaces every position where the
-/// conversion dict has more than one valid target, without trying to
-/// resolve which is right. Resolution is the LLM's job.
-#[derive(Debug, Clone)]
-pub struct AmbiguousDecision {
-    /// Source byte offset (start of the matched key).
-    pub src_pos: usize,
-    /// The source key (Simplified).
-    pub src_key: String,
-    /// All candidate target forms (Traditional). First is the
-    /// dict's default; the rest are alternates.
-    pub candidates: Vec<String>,
-    /// Up to 16 chars of context from the source text immediately
-    /// before the match.
-    pub left_context: String,
-    /// Up to 16 chars of context from the source text immediately
-    /// after the match.
-    pub right_context: String,
-    /// What zhhz actually emitted at this position (the picked
-    /// candidate). The LLM may override this.
-    pub picked: String,
-}
-
 /// A built-in OpenCC conversion configuration.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum Config {
@@ -344,130 +319,6 @@ impl Converter {
         }
         out
     }
-
-    /// Convert text and return a list of multi-value positions
-    /// encountered along the way. The list is a **sidecar** — the
-    /// primary output (`String`) is the same as `convert`. The
-    /// caller can pass the list to an LLM, an encoder, or a human
-    /// reviewer to decide which target to keep at each position.
-    ///
-    /// This is decoupled from the conversion hot path: we do a
-    /// separate, cheap FMM-like walk over the input using the same
-    /// dict trie, and record every position that has more than one
-    /// candidate. No borrow gymnastics, no mutable threading.
-    pub fn convert_with_report(&self, text: &str) -> (String, Vec<AmbiguousDecision>) {
-        let out = self.convert(text);
-        let decisions = self.scan_ambiguous(text);
-        (out, decisions)
-    }
-
-    /// Walk the input text and find every position where the
-    /// conversion dict has a multi-value entry. The walk is the
-    /// same FMM the converter uses internally, but it only records
-    /// (it does not produce a converted output).
-    pub fn scan_ambiguous(&self, text: &str) -> Vec<AmbiguousDecision> {
-        let mut decisions: Vec<AmbiguousDecision> = Vec::new();
-        // First do the segmentation walk so we visit the same segments
-        // the converter visits (otherwise a multi-value key in an
-        // unmatched run could be missed, and a key spanning a segment
-        // boundary would be double-counted).
-        let segments: Vec<&str> = match &self.cfg.segmentation {
-            Some(seg_group) => {
-                let mut v: Vec<&str> = Vec::new();
-                for s in SegmentIter::new(text, seg_group) {
-                    v.push(s);
-                }
-                v
-            }
-            None => vec![text],
-        };
-        // For each segment, run the FMM over the conversion chain and
-        // record any multi-value match.
-        for segment in segments {
-            let seg_start = segment.as_ptr() as usize - text.as_ptr() as usize;
-            for_each_multi_in_segment(
-                &self.cfg.chain,
-                segment,
-                text,
-                seg_start,
-                &mut decisions,
-            );
-        }
-        decisions
-    }
-}
-
-/// Internal helper: walk a single segment through the conversion
-/// chain's first stage (the conversion group, not segmentation) and
-/// record any multi-value FMM match. We only need to scan the
-/// chain's first stage for multi-value positions because subsequent
-/// stages in the chain (e.g. TWVariants after STPhrases) operate on
-/// the *output* of the first stage and don't see new ambiguity in
-/// the source text.
-fn for_each_multi_in_segment(
-    group: &[Vec<Dict>],
-    segment: &str,
-    full_text: &str,
-    seg_byte_offset: usize,
-    out: &mut Vec<AmbiguousDecision>,
-) {
-    let first_stage = match group.first() {
-        Some(g) => g,
-        None => return,
-    };
-    let mut pos = 0;
-    while pos < segment.len() {
-        let rest = &segment[pos..];
-        if let Some((key_len, cands)) = group_longest_prefix_multi(first_stage, rest) {
-            if cands.len() > 1 {
-                let src_pos = seg_byte_offset + pos;
-                let src_key = rest[..key_len].to_string();
-                out.push(AmbiguousDecision {
-                    src_pos,
-                    src_key: src_key.clone(),
-                    candidates: cands.iter().map(|s| (*s).to_string()).collect(),
-                    left_context: left_context(full_text, src_pos, 16),
-                    right_context: right_context(full_text, src_pos + key_len, 16),
-                    picked: cands[0].to_string(),
-                });
-            }
-            pos += key_len;
-        } else {
-            let ch_len = rest
-                .chars()
-                .next()
-                .map(|c| c.len_utf8())
-                .unwrap_or_else(|| rest.len().min(4));
-            pos += ch_len;
-        }
-    }
-}
-
-fn left_context(full: &str, pos: usize, n_chars: usize) -> String {
-    if pos == 0 || pos > full.len() {
-        return String::new();
-    }
-    let prefix = &full[..pos];
-    let start = prefix
-        .char_indices()
-        .rev()
-        .nth(n_chars.saturating_sub(1))
-        .map(|(i, _)| i)
-        .unwrap_or(0);
-    prefix[start..].to_string()
-}
-
-fn right_context(full: &str, pos: usize, n_chars: usize) -> String {
-    if pos >= full.len() {
-        return String::new();
-    }
-    let suffix = &full[pos..];
-    let end = suffix
-        .char_indices()
-        .nth(n_chars)
-        .map(|(i, _)| i)
-        .unwrap_or(suffix.len());
-    suffix[..end].to_string()
 }
 
 /// Iterate the segments produced by FMM segmentation of `text`, yielding slices
@@ -612,8 +463,29 @@ fn convert_segment(
     let mut pos = 0;
     while pos < segment.len() {
         let rest = &segment[pos..];
+        // Fast path: no n-gram model loaded, so we never need the
+        // candidates Vec that `group_longest_prefix_multi` allocates on
+        // every match. The cheap `group_longest_prefix` returns
+        // `&str` directly — zero allocation per FMM match.
+        // (zhhz#14: this restores v0.6 fast-path throughput.)
+        if ngram.is_none() {
+            if let Some((key_len, value)) = group_longest_prefix(group, rest) {
+                out.push_str(value);
+                pos += key_len;
+                continue;
+            }
+            let ch_len = rest
+                .chars()
+                .next()
+                .map(|c| c.len_utf8())
+                .unwrap_or_else(|| rest.len().min(4));
+            out.push_str(&rest[..ch_len]);
+            pos += ch_len;
+            continue;
+        }
+        // Disambig path: multi-value exposure needed for n-gram lookup.
         if let Some((key_len, cands)) = group_longest_prefix_multi(group, rest) {
-            if cands.len() > 1 && ngram.is_some() {
+            if cands.len() > 1 {
                 let model = ngram.unwrap();
                 let first_chars: Vec<String> = {
                     let mut v = Vec::new();
@@ -680,11 +552,19 @@ fn convert_segment(
         }
     }
     // Truncate the running prev to the last 2 chars to bound memory.
-    let mut combined = String::with_capacity(prev_emit.len() + out.len());
-    combined.push_str(prev_emit);
-    combined.push_str(&out);
-    let keep: String = combined.chars().rev().take(2).collect::<Vec<_>>()
-        .into_iter().rev().collect();
+    // (zhhz#14: in fast mode prev_emit is always empty, so we just
+    // emit the trailing 2 chars of `out` directly — no combined String,
+    // no Vec<char> allocation.)
+    let keep: String = if prev_emit.is_empty() {
+        let tail: Vec<char> = out.chars().rev().take(2).collect();
+        tail.into_iter().rev().collect()
+    } else {
+        let mut combined = String::with_capacity(prev_emit.len() + out.len());
+        combined.push_str(prev_emit);
+        combined.push_str(&out);
+        let tail: Vec<char> = combined.chars().rev().take(2).collect();
+        tail.into_iter().rev().collect()
+    };
     (out, keep)
 }
 

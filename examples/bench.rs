@@ -1,8 +1,8 @@
-// Benchmark zhhz modes (--fast / --bigram / --trigram) with and
-// without --report, plus opencc for comparison.
+// Benchmark zhhz modes (--fast / --bigram / --trigram), plus opencc
+// for comparison.
 //
-// Measures: throughput (MB/s) on 10 MB Chinese text, plus the
-// overhead of running the multi-value scan (report on vs off).
+// Measures: throughput (MB/s) on 10 MB Chinese text.
+// Report-mode overhead is measured in v0.8 (zhhz#15).
 use std::time::Instant;
 use zhhz::{Config, Converter, NgramMode, NgramModel};
 
@@ -24,7 +24,7 @@ fn main() {
         }
     };
 
-    // Pre-build one converter per (mode, report-on/off) combination.
+    // Pre-build one converter per mode.
     let fast = Converter::new(Config::S2t);
     let bigram =
         Converter::new(Config::S2t).with_ngram(model.clone_model(), NgramMode::Bigram);
@@ -35,34 +35,22 @@ fn main() {
     let mbps = |us: u128| text.len() as f64 / 1_048_576.0 / (us as f64 / 1_000_000.0);
     let ms = |us: u128| us as f64 / runs as f64 / 1000.0;
 
-    println!("{:<18}  {:<10}  {:>10}  {:>10}", "mode", "report", "avg (ms)", "MB/s");
-    println!("{}", "-".repeat(54));
+    println!("{:<18}  {:>10}  {:>10}", "mode", "avg (ms)", "MB/s");
+    println!("{}", "-".repeat(42));
 
-    // fast, no report
+    // fast
     let t = time_it(runs, || { fast.convert(&text); });
-    println!("{:<18}  {:<10}  {:>10.1}  {:>10.2}", "fast", "off", ms(t), mbps(t / runs as u128));
+    println!("{:<18}  {:>10.1}  {:>10.2}", "fast", ms(t), mbps(t / runs as u128));
 
-    // fast, with report
-    let t = time_it(runs, || { let _ = fast.convert_with_report(&text); });
-    println!("{:<18}  {:<10}  {:>10.1}  {:>10.2}", "fast", "on", ms(t), mbps(t / runs as u128));
-
-    // bigram, no report
+    // bigram
     let t = time_it(runs, || { bigram.convert(&text); });
-    println!("{:<18}  {:<10}  {:>10.1}  {:>10.2}", "bigram", "off", ms(t), mbps(t / runs as u128));
+    println!("{:<18}  {:>10.1}  {:>10.2}", "bigram", ms(t), mbps(t / runs as u128));
 
-    // bigram, with report
-    let t = time_it(runs, || { let _ = bigram.convert_with_report(&text); });
-    println!("{:<18}  {:<10}  {:>10.1}  {:>10.2}", "bigram", "on", ms(t), mbps(t / runs as u128));
-
-    // trigram, no report
+    // trigram
     let t = time_it(runs, || { trigram.convert(&text); });
-    println!("{:<18}  {:<10}  {:>10.1}  {:>10.2}", "trigram", "off", ms(t), mbps(t / runs as u128));
+    println!("{:<18}  {:>10.1}  {:>10.2}", "trigram", ms(t), mbps(t / runs as u128));
 
-    // trigram, with report
-    let t = time_it(runs, || { let _ = trigram.convert_with_report(&text); });
-    println!("{:<18}  {:<10}  {:>10.1}  {:>10.2}", "trigram", "on", ms(t), mbps(t / runs as u128));
-
-    // opencc
+    // opencc baseline
     let _ = std::fs::write("/tmp/bench-input.txt", &text);
     let t = time_it(runs, || {
         let out = std::process::Command::new("opencc")
@@ -71,13 +59,7 @@ fn main() {
             .expect("opencc");
         assert!(out.status.success());
     });
-    println!("{:<18}  {:<10}  {:>10.1}  {:>10.2}", "opencc s2t", "-", ms(t), mbps(t / runs as u128));
-
-    // Multi-value decision count for the sample text (to size the
-    // report overhead vs. text size).
-    let (_, decs) = fast.convert_with_report(&text);
-    eprintln!("\nmulti-value decisions in 10 MB text: {}", decs.len());
-    eprintln!("(that's {} decisions per MB)", decs.len() as f64 / 10.0);
+    println!("{:<18}  {:>10.1}  {:>10.2}", "opencc s2t", ms(t), mbps(t / runs as u128));
 }
 
 fn time_it<F: FnMut()>(runs: usize, mut f: F) -> u128 {

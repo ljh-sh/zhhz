@@ -53,16 +53,6 @@ OPTIONS:
         --trigram           (Default when --ngram is given without
                              --bigram / --fast.) Use a 3-gram model for
                              multi-value disambig. Implies --ngram.
-        --report <PATH>     Write a sidecar TSV file listing every
-                             multi-value position the engine encountered
-                             (with left/right context, candidates, and
-                             what was picked). Intended for LLM /
-                             encoder / human review post-processing.
-                             Format: `# source`, `# output` comment
-                             lines + one TSV row per decision
-                             (`pos | key | left | right | picked |
-                             candidates(|joined)`). Does not affect
-                             the converted output.
         --files-from <PATH|->  Read a newline-separated list of paths from
                              a file or stdin ('-'). Directories are walked
                              recursively.
@@ -95,13 +85,6 @@ pub struct Cli {
     pub null: bool,
     pub ngram: Option<PathBuf>,
     pub mode_flag: ModeFlag,
-    /// Path to write a sidecar JSON file listing every multi-value
-    /// decision the engine made. The file is a JSON object
-    /// `{source, output, decisions: [{src_pos, src_key, candidates,
-    /// left_context, right_context, picked}, ...]}`. Downstream
-    /// tools (LLM, encoder, human review) read this to fix cases
-    /// the dict / n-gram couldn't disambig.
-    pub report: Option<PathBuf>,
 }
 
 /// User-facing mode selection. `Default` means: no flag given; if a
@@ -134,7 +117,6 @@ fn parse_args(argv: Vec<String>) -> Result<Action> {
         null: false,
         ngram: None,
         mode_flag: ModeFlag::Default,
-        report: None,
     };
     let mut args = argv.into_iter().skip(1).peekable();
     while let Some(arg) = args.next() {
@@ -150,9 +132,6 @@ fn parse_args(argv: Vec<String>) -> Result<Action> {
             "--trigram" => cli.mode_flag = ModeFlag::Trigram,
             "--ngram" => {
                 cli.ngram = Some(PathBuf::from(take_value(&mut args, "--ngram")?));
-            }
-            "--report" => {
-                cli.report = Some(PathBuf::from(take_value(&mut args, "--report")?));
             }
             "--files-from" => {
                 cli.files_from = Some(PathBuf::from(take_value(&mut args, "--files-from")?));
@@ -182,9 +161,6 @@ fn parse_args(argv: Vec<String>) -> Result<Action> {
                     "--dict" => cli.dicts.push(PathBuf::from(take_owned_value(flag, val)?)),
                     "--ngram" => {
                         cli.ngram = Some(PathBuf::from(take_owned_value(flag, val)?));
-                    }
-                    "--report" => {
-                        cli.report = Some(PathBuf::from(take_owned_value(flag, val)?));
                     }
                     "--auto" | "--in-place" | "--list" => {
                         if val.is_some() {
@@ -482,70 +458,10 @@ fn run_cli(cli: Cli) -> Result<()> {
                 .read_to_string(&mut content)
                 .context("failed to read stdin")?;
         }
-        let (output, decisions) = converter.convert_with_report(&content);
-        if let Some(report_path) = &cli.report {
-            write_report(report_path, &content, &output, &decisions)?;
-        }
+        let output = converter.convert(&content);
         write_one(&path, &output, &cli)?;
     }
     Ok(())
-}
-
-/// Serialize a `ConvertReport` to TSV. One row per multi-value
-/// decision, plus two comment lines at the top with the source and
-/// output text. Format (after the two `#` comment lines):
-///
-/// ```text
-/// pos\tkey\tleft\tright\tpicked\tcandidates(|joined)
-/// 3\t出戏\t这\t真好看\t出戲\t出戲|齣戲
-/// ```
-///
-/// The `#` lines preserve the full source / output for the LLM
-/// without bloating each row. The `candidates` column uses `|` as
-/// the in-cell separator because `|` never appears in Chinese text.
-/// TSV is much smaller than JSON for LLM input — roughly 1/3 the
-/// tokens — which matters when we're paying per-token.
-fn write_report(
-    path: &Path,
-    source: &str,
-    output: &str,
-    decisions: &[crate::engine::AmbiguousDecision],
-) -> Result<()> {
-    let mut s = String::new();
-    s.push_str(&format!("# source\t{}\n", tsv_escape(source)));
-    s.push_str(&format!("# output\t{}\n", tsv_escape(output)));
-    s.push_str("pos\tkey\tleft\tright\tpicked\tcandidates\n");
-    for d in decisions {
-        let cands = d.candidates.join("|");
-        s.push_str(&format!(
-            "{}\t{}\t{}\t{}\t{}\t{}\n",
-            d.src_pos,
-            tsv_escape(&d.src_key),
-            tsv_escape(&d.left_context),
-            tsv_escape(&d.right_context),
-            tsv_escape(&d.picked),
-            tsv_escape(&cands),
-        ));
-    }
-    std::fs::write(path, s.as_bytes())
-        .with_context(|| format!("failed to write report {}", path.display()))?;
-    Ok(())
-}
-
-/// TSV field escape: replace `\n`, `\r`, `\t` so the field doesn't
-/// break the row layout. The result is a single-line string with
-/// these chars replaced by their 2-char escape.
-fn tsv_escape(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    for c in s.chars() {
-        match c {
-            '\n' => out.push_str("\\n"),
-            '\r' => out.push_str("\\r"),
-            '\t' => out.push_str("\\t"),
-            c => out.push(c),
-        }
-    }
-    out
 }
 
 /// Cheap-ish clone of the model for the 4 --auto converters: deep-clone
