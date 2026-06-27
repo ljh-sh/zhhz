@@ -27,7 +27,13 @@ struct Node {
     children_map: HashMap<char, u32>,
     /// Frozen child list (sorted by `char`). Populated by `finalize()`.
     children: Vec<(char, u32)>,
+    /// Default (first) candidate value — used by the hot path
+    /// (`longest_prefix`) for back-compat and zero-overhead lookup.
     value: Option<String>,
+    /// All candidate values (default first). Populated only when the
+    /// dictionary line had multiple whitespace-separated values; used by
+    /// `longest_prefix_multi` for n-gram disambig.
+    candidates: Option<Vec<String>>,
 }
 
 pub struct Dict {
@@ -36,6 +42,10 @@ pub struct Dict {
 
 impl Dict {
     /// Build a dictionary from raw OpenCC `.txt` dictionary text.
+    ///
+    /// Lines are `key<TAB>value` or `key<TAB>value1 value2 ...`. The first
+    /// value is the default (used by the hot path). All values are kept for
+    /// `longest_prefix_multi` callers (n-gram disambig).
     pub fn from_text(raw: &str) -> Self {
         let mut d = Dict {
             nodes: vec![Node::default()],
@@ -48,10 +58,13 @@ impl Dict {
             let Some((key, vals)) = line.split_once('\t') else {
                 continue;
             };
-            let Some(first) = vals.split_whitespace().next() else {
+            let mut iter = vals.split_whitespace();
+            let Some(first) = iter.next() else {
                 continue;
             };
-            d.insert(key, first);
+            // Rest of the candidates (may be empty).
+            let rest: Vec<String> = iter.map(|s| s.to_string()).collect();
+            d.insert(key, first, if rest.is_empty() { None } else { Some(rest) });
         }
         d.finalize();
         d
@@ -64,13 +77,13 @@ impl Dict {
             nodes: vec![Node::default()],
         };
         for (k, v) in entries {
-            d.insert(k, v);
+            d.insert(k, v, None);
         }
         d.finalize();
         d
     }
 
-    fn insert(&mut self, key: &str, value: &str) {
+    fn insert(&mut self, key: &str, value: &str, extra: Option<Vec<String>>) {
         let mut cur: u32 = 0;
         for ch in key.chars() {
             // Immutable lookup first; the borrow ends before the create
@@ -89,6 +102,12 @@ impl Dict {
             cur = child;
         }
         self.nodes[cur as usize].value = Some(value.to_string());
+        if let Some(more) = extra {
+            let mut all = Vec::with_capacity(1 + more.len());
+            all.push(value.to_string());
+            all.extend(more);
+            self.nodes[cur as usize].candidates = Some(all);
+        }
     }
 
     /// Move each node's `children_map` into a sorted `Vec` and clear the
@@ -124,6 +143,41 @@ impl Dict {
         }
         best
     }
+
+    /// Longest-prefix match returning **all** candidate values, ordered
+    /// default-first. Returns `None` if no key prefixes `text`; returns
+    /// `Some((len, single))` for single-candidate matches; returns
+    /// `Some((len, all))` for multi-candidate matches where `all.len() > 1`.
+    ///
+    /// `single` and `all` borrow from the dict; the caller can either
+    /// emit the first value (fast path) or call into a language model to
+    /// disambiguate.
+    pub fn longest_prefix_multi<'a>(
+        &'a self,
+        text: &str,
+    ) -> Option<(usize, Vec<&'a str>)> {
+        let mut node: u32 = 0;
+        let mut best: Option<(usize, Vec<&'a str>)> = None;
+        for (i, ch) in text.char_indices() {
+            let n = &self.nodes[node as usize];
+            match n.children.binary_search_by_key(&ch, |(c, _)| *c) {
+                Ok(pos) => {
+                    let child = n.children[pos].1;
+                    let cn = &self.nodes[child as usize];
+                    if let Some(cands) = &cn.candidates {
+                        // Multi-value: collect all.
+                        let v: Vec<&str> = cands.iter().map(String::as_str).collect();
+                        best = Some((i + ch.len_utf8(), v));
+                    } else if let Some(v) = &cn.value {
+                        best = Some((i + ch.len_utf8(), vec![v.as_str()]));
+                    }
+                    node = child;
+                }
+                Err(_) => break,
+            }
+        }
+        best
+    }
 }
 
 /// Group longest-prefix: the first (highest-priority) dictionary that has
@@ -133,6 +187,19 @@ impl Dict {
 pub fn group_longest_prefix<'a>(group: &'a [Dict], text: &str) -> Option<(usize, &'a str)> {
     for dict in group {
         if let Some(m) = dict.longest_prefix(text) {
+            return Some(m);
+        }
+    }
+    None
+}
+
+/// Group longest-prefix with multi-value candidates (for n-gram disambig).
+pub fn group_longest_prefix_multi<'a>(
+    group: &'a [Dict],
+    text: &str,
+) -> Option<(usize, Vec<&'a str>)> {
+    for dict in group {
+        if let Some(m) = dict.longest_prefix_multi(text) {
             return Some(m);
         }
     }
@@ -163,5 +230,28 @@ mod tests {
             .collect();
         let d = Dict::from_entries(&entries);
         assert_eq!(d.longest_prefix("汉字0尾"), Some((7, "漢字0")));
+    }
+
+    #[test]
+    fn multi_value_exposed() {
+        // 出 -> 出 齣  (multi-value, default first)
+        let raw = "出\t出 齣\n";
+        let d = Dict::from_text(raw);
+        let (len, cands) = d.longest_prefix_multi("出门").unwrap();
+        assert_eq!(len, 3);
+        assert_eq!(cands, vec!["出", "齣"]);
+        // Default path still returns just first
+        let (len, first) = d.longest_prefix("出门").unwrap();
+        assert_eq!((len, first), (3, "出"));
+    }
+
+    #[test]
+    fn single_value_no_multi() {
+        // Single-value entries should still work and have cands.len() == 1
+        let raw = "中\t中\n国\t國\n";
+        let d = Dict::from_text(raw);
+        let (len, cands) = d.longest_prefix_multi("中国").unwrap();
+        assert_eq!(len, 3);
+        assert_eq!(cands, vec!["中"]);
     }
 }

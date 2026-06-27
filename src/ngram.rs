@@ -31,9 +31,9 @@ use std::io;
 /// An ARPA-format n-gram language model. Stores log10 probabilities.
 #[derive(Debug, Default)]
 pub struct NgramModel {
-    unigrams: HashMap<String, f64>,
-    bigrams: HashMap<(String, String), f64>,
-    trigrams: HashMap<(String, String, String), f64>,
+    pub(crate) unigrams: HashMap<String, f64>,
+    pub(crate) bigrams: HashMap<(String, String), f64>,
+    pub(crate) trigrams: HashMap<(String, String, String), f64>,
 }
 
 impl NgramModel {
@@ -132,6 +132,31 @@ impl NgramModel {
     /// Number of loaded bigrams (for stats / debugging).
     pub fn bigram_count(&self) -> usize {
         self.bigrams.len()
+    }
+
+    /// Raw access to the unigram table, for cloning (CLI builds one
+    /// `Converter` per region).
+    pub fn unigrams_raw(&self) -> &HashMap<String, f64> {
+        &self.unigrams
+    }
+
+    /// Raw access to the bigram table, for cloning.
+    pub fn bigrams_raw(&self) -> &HashMap<(String, String), f64> {
+        &self.bigrams
+    }
+
+    /// Raw access to the trigram table, for cloning.
+    pub fn trigrams_raw(&self) -> &HashMap<(String, String, String), f64> {
+        &self.trigrams
+    }
+
+    /// Cheap-ish deep clone (ARPA models are a few MB).
+    pub fn clone_model(&self) -> NgramModel {
+        NgramModel {
+            unigrams: self.unigrams.clone(),
+            bigrams: self.bigrams.clone(),
+            trigrams: self.trigrams.clone(),
+        }
     }
 }
 

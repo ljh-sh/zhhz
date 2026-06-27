@@ -16,7 +16,19 @@
 
 use crate::config::{self, ResolvedConfig};
 use crate::data;
-use crate::dict::{group_longest_prefix, Dict};
+use crate::dict::{group_longest_prefix, group_longest_prefix_multi, Dict};
+use crate::ngram::NgramModel;
+
+/// N-gram disambiguation mode.
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub enum NgramMode {
+    /// No n-gram disambiguation — fast path, equivalent to v0.6.0.
+    Off,
+    /// Use bigram (P(c2 | c1)) for disambig.
+    Bigram,
+    /// Use trigram (P(c3 | c1, c2)) for disambig, falls back to bigram.
+    Trigram,
+}
 
 /// A built-in OpenCC conversion configuration.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -227,34 +239,83 @@ pub fn region_pair_config(from: Region, to: Region) -> Result<Config, String> {
 /// pipeline and reuse it for many inputs.
 pub struct Converter {
     cfg: ResolvedConfig,
+    ngram: Option<NgramModel>,
+    ngram_mode: NgramMode,
 }
 
 impl Converter {
     /// Build a converter for a built-in config with no custom words.
+    /// No n-gram disambig (fast path; v0.6.0 behaviour).
     pub fn new(config: Config) -> Converter {
         Converter::with_custom(config, &[])
     }
 
     /// Build a converter, injecting `custom` words as the highest-priority
     /// dictionary in both segmentation and every conversion stage.
+    /// No n-gram disambig.
     pub fn with_custom(config: Config, custom: &[(String, String)]) -> Converter {
         let json = data::config_text(config.name())
             .unwrap_or_else(|| panic!("zhhz: missing embedded config '{}'", config.name()));
         let cfg = config::resolve(json, custom)
             .unwrap_or_else(|e| panic!("zhhz: failed to resolve config '{}': {e}", config.name()));
-        Converter { cfg }
+        Converter {
+            cfg,
+            ngram: None,
+            ngram_mode: NgramMode::Off,
+        }
+    }
+
+    /// Enable n-gram disambiguation with the given model and mode.
+    /// The mode must not be `Off` if a model is supplied.
+    pub fn with_ngram(mut self, model: NgramModel, mode: NgramMode) -> Self {
+        debug_assert!(mode != NgramMode::Off);
+        self.ngram = Some(model);
+        self.ngram_mode = mode;
+        self
+    }
+
+    /// Build a converter with everything: config, custom words, and
+    /// optional n-gram model.
+    pub fn with_ngram_custom(
+        config: Config,
+        custom: &[(String, String)],
+        model: Option<(NgramModel, NgramMode)>,
+    ) -> Converter {
+        let mut c = Self::with_custom(config, custom);
+        if let Some((m, mode)) = model {
+            c = c.with_ngram(m, mode);
+        }
+        c
     }
 
     /// Convert a piece of text.
     pub fn convert(&self, text: &str) -> String {
         let mut out = String::with_capacity(text.len() + text.len() / 5);
+        let mut prev_emit = String::new();
         match &self.cfg.segmentation {
             Some(seg_group) => {
                 for segment in SegmentIter::new(text, seg_group) {
-                    out.push_str(&convert_through_chain(segment, &self.cfg.chain));
+                    let (new_seg, new_prev) = convert_through_chain(
+                        segment,
+                        &self.cfg.chain,
+                        self.ngram.as_ref(),
+                        self.ngram_mode,
+                        &prev_emit,
+                    );
+                    out.push_str(&new_seg);
+                    prev_emit = new_prev;
                 }
             }
-            None => out.push_str(&convert_through_chain(text, &self.cfg.chain)),
+            None => {
+                let (new_seg, _) = convert_through_chain(
+                    text,
+                    &self.cfg.chain,
+                    self.ngram.as_ref(),
+                    self.ngram_mode,
+                    &prev_emit,
+                );
+                out.push_str(&new_seg);
+            }
         }
         out
     }
@@ -332,27 +393,132 @@ impl<'a> Iterator for SegmentIter<'a> {
 }
 
 /// Run a single segment through the whole conversion chain.
-fn convert_through_chain(segment: &str, chain: &[Vec<Dict>]) -> String {
+///
+/// `prev_emit` is the running emitted text from earlier segments in the
+/// same input (or empty for the first segment). It is the source of the
+/// n-gram `prev` context used to disambiguate multi-value phrase matches
+/// near the start of this segment — without it, a multi-value match at
+/// position 0 of the segment would have no left context and would fall
+/// back to the dict's first candidate.
+fn convert_through_chain(
+    segment: &str,
+    chain: &[Vec<Dict>],
+    ngram: Option<&NgramModel>,
+    mode: NgramMode,
+    prev_emit: &str,
+) -> (String, String) {
     if chain.is_empty() {
-        return segment.to_string();
+        return (segment.to_string(), prev_emit.to_string());
     }
     let mut current = segment.to_string();
+    let mut stage_prev = prev_emit.to_string();
+    let mut final_prev = prev_emit.to_string();
     for stage in chain {
-        current = convert_segment(&current, stage);
+        let (new_current, new_prev) =
+            convert_segment(&current, stage, ngram, mode, &stage_prev);
+        current = new_current;
+        stage_prev = new_prev.clone();
+        final_prev = new_prev;
     }
-    current
+    (current, final_prev)
 }
 
 /// One conversion stage: longest-prefix per position. On a match, emit the
 /// default candidate and advance by the key length; on a miss, copy one
 /// character through and advance by one character.
-fn convert_segment(segment: &str, group: &[Dict]) -> String {
+///
+/// One conversion stage: longest-prefix per position. On a match, emit the
+/// default candidate and advance by the key length; on a miss, copy one
+/// character through and advance by one character.
+///
+/// `prev_emit` is the running emitted text from earlier segments in the
+/// same input (or empty for the first segment). It provides the n-gram
+/// `prev` context for multi-value matches at the start of this segment.
+///
+/// Returns `(out, new_prev)` where `new_prev` is `prev_emit + out`
+/// (truncated to the last 2 chars), ready to be passed as `prev_emit`
+/// for the next segment.
+///
+/// If `ngram` is `Some`, multi-value matches where the candidates differ
+/// at the **first** char position are disambiguated by the n-gram model
+/// using `prev_emit` (or the last char(s) of `out` for matches at later
+/// positions) as context. The remaining chars of the candidate (positions
+/// 1..) follow the first-char choice.
+///
+/// The "first char only" rule is deliberate: in Chinese, the n-gram
+/// signal for in-phrase ambiguity (e.g. "一出" → "一齣" vs "一出") is
+/// often misleading because the corpus is biased toward the more common
+/// bigram. The dict's first candidate is more reliable for those cases.
+/// The n-gram helps primarily when the ambiguity is in the *leading*
+/// char (e.g. "这出戏" → "這出戲" vs "這齣戲" — where 這 is fixed but
+/// 出/齣 depends on the left context).
+fn convert_segment(
+    segment: &str,
+    group: &[Dict],
+    ngram: Option<&NgramModel>,
+    mode: NgramMode,
+    prev_emit: &str,
+) -> (String, String) {
     let mut out = String::with_capacity(segment.len() + segment.len() / 5);
     let mut pos = 0;
     while pos < segment.len() {
         let rest = &segment[pos..];
-        if let Some((key_len, value)) = group_longest_prefix(group, rest) {
-            out.push_str(value);
+        if let Some((key_len, cands)) = group_longest_prefix_multi(group, rest) {
+            if cands.len() > 1 && ngram.is_some() {
+                let model = ngram.unwrap();
+                let first_chars: Vec<String> = {
+                    let mut v = Vec::new();
+                    let mut seen = std::collections::HashSet::new();
+                    for c in &cands {
+                        if let Some(ch) = c.chars().next() {
+                            let s = ch.to_string();
+                            if seen.insert(s.clone()) {
+                                v.push(s);
+                            }
+                        }
+                    }
+                    v
+                };
+                if first_chars.len() > 1 {
+                    // Disambig. The prev is the last char(s) of
+                    // (prev_emit + out): at position 0 of the segment,
+                    // out is empty so prev is just prev_emit. Later in
+                    // the segment, prev uses the trailing out.
+                    let combined: String = {
+                        let mut s = prev_emit.to_string();
+                        s.push_str(&out);
+                        s
+                    };
+                    let prev_owned: Option<String> = match mode {
+                        NgramMode::Bigram => {
+                            combined.chars().last().map(|c| c.to_string())
+                        }
+                        NgramMode::Trigram => {
+                            let n: Vec<char> =
+                                combined.chars().rev().take(2).collect();
+                            if n.is_empty() {
+                                None
+                            } else {
+                                Some(n.into_iter().rev().collect())
+                            }
+                        }
+                        NgramMode::Off => unreachable!(),
+                    };
+                    let pick = model
+                        .disambiguate(prev_owned.as_deref(), &first_chars)
+                        .unwrap_or_else(|| first_chars[0].clone());
+                    let mut rest_of_first = String::new();
+                    for ch in cands[0].chars().skip(1) {
+                        rest_of_first.push(ch);
+                    }
+                    out.push_str(&pick);
+                    out.push_str(&rest_of_first);
+                } else {
+                    out.push_str(cands[0]);
+                }
+            } else {
+                out.push_str(cands[0]);
+            }
             pos += key_len;
         } else {
             let ch_len = rest
@@ -364,7 +530,13 @@ fn convert_segment(segment: &str, group: &[Dict]) -> String {
             pos += ch_len;
         }
     }
-    out
+    // Truncate the running prev to the last 2 chars to bound memory.
+    let mut combined = String::with_capacity(prev_emit.len() + out.len());
+    combined.push_str(prev_emit);
+    combined.push_str(&out);
+    let keep: String = combined.chars().rev().take(2).collect::<Vec<_>>()
+        .into_iter().rev().collect();
+    (out, keep)
 }
 
 #[cfg(test)]
