@@ -53,6 +53,12 @@ OPTIONS:
         --trigram           (Default when --ngram is given without
                              --bigram / --fast.) Use a 3-gram model for
                              multi-value disambig. Implies --ngram.
+        --report <PATH>     Write a sidecar JSON file listing every
+                             multi-value position the engine encountered
+                             (with left/right context, candidates, and
+                             what was picked). Intended for LLM /
+                             encoder / human review post-processing.
+                             Does not affect the converted output.
         --files-from <PATH|->  Read a newline-separated list of paths from
                              a file or stdin ('-'). Directories are walked
                              recursively.
@@ -85,6 +91,13 @@ pub struct Cli {
     pub null: bool,
     pub ngram: Option<PathBuf>,
     pub mode_flag: ModeFlag,
+    /// Path to write a sidecar JSON file listing every multi-value
+    /// decision the engine made. The file is a JSON object
+    /// `{source, output, decisions: [{src_pos, src_key, candidates,
+    /// left_context, right_context, picked}, ...]}`. Downstream
+    /// tools (LLM, encoder, human review) read this to fix cases
+    /// the dict / n-gram couldn't disambig.
+    pub report: Option<PathBuf>,
 }
 
 /// User-facing mode selection. `Default` means: no flag given; if a
@@ -117,6 +130,7 @@ fn parse_args(argv: Vec<String>) -> Result<Action> {
         null: false,
         ngram: None,
         mode_flag: ModeFlag::Default,
+        report: None,
     };
     let mut args = argv.into_iter().skip(1).peekable();
     while let Some(arg) = args.next() {
@@ -132,6 +146,9 @@ fn parse_args(argv: Vec<String>) -> Result<Action> {
             "--trigram" => cli.mode_flag = ModeFlag::Trigram,
             "--ngram" => {
                 cli.ngram = Some(PathBuf::from(take_value(&mut args, "--ngram")?));
+            }
+            "--report" => {
+                cli.report = Some(PathBuf::from(take_value(&mut args, "--report")?));
             }
             "--files-from" => {
                 cli.files_from = Some(PathBuf::from(take_value(&mut args, "--files-from")?));
@@ -161,6 +178,9 @@ fn parse_args(argv: Vec<String>) -> Result<Action> {
                     "--dict" => cli.dicts.push(PathBuf::from(take_owned_value(flag, val)?)),
                     "--ngram" => {
                         cli.ngram = Some(PathBuf::from(take_owned_value(flag, val)?));
+                    }
+                    "--report" => {
+                        cli.report = Some(PathBuf::from(take_owned_value(flag, val)?));
                     }
                     "--auto" | "--in-place" | "--list" => {
                         if val.is_some() {
@@ -458,10 +478,72 @@ fn run_cli(cli: Cli) -> Result<()> {
                 .read_to_string(&mut content)
                 .context("failed to read stdin")?;
         }
-        let output = converter.convert(&content);
+        let (output, decisions) = converter.convert_with_report(&content);
+        if let Some(report_path) = &cli.report {
+            write_report(report_path, &content, &output, &decisions)?;
+        }
         write_one(&path, &output, &cli)?;
     }
     Ok(())
+}
+
+/// Serialize a `ConvertReport` to JSON. The format is intentionally
+/// simple (not a streaming format) — these files are small (one per
+/// input, typically <10 KB) and the consumer is an LLM or human.
+fn write_report(
+    path: &Path,
+    source: &str,
+    output: &str,
+    decisions: &[crate::engine::AmbiguousDecision],
+) -> Result<()> {
+    let mut s = String::from("{\n");
+    s.push_str(&format!("  \"source\": {},\n", json_string(source)));
+    s.push_str(&format!("  \"output\": {},\n", json_string(output)));
+    s.push_str("  \"decisions\": [\n");
+    for (i, d) in decisions.iter().enumerate() {
+        if i > 0 {
+            s.push_str(",\n");
+        }
+        s.push_str(&format!(
+            "    {{\"src_pos\": {}, \"src_key\": {}, \"candidates\": [{}], \
+             \"left_context\": {}, \"right_context\": {}, \"picked\": {}}}",
+            d.src_pos,
+            json_string(&d.src_key),
+            d.candidates
+                .iter()
+                .map(|c| json_string(c))
+                .collect::<Vec<_>>()
+                .join(", "),
+            json_string(&d.left_context),
+            json_string(&d.right_context),
+            json_string(&d.picked),
+        ));
+    }
+    s.push_str("\n  ]\n}\n");
+    std::fs::write(path, s.as_bytes())
+        .with_context(|| format!("failed to write report {}", path.display()))?;
+    Ok(())
+}
+
+/// Minimal JSON string escaping (only what we need for Chinese
+/// characters and quotes). Avoiding the `serde` dependency to keep
+/// the binary small.
+fn json_string(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() + 2);
+    out.push('"');
+    for c in s.chars() {
+        match c {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            c if (c as u32) < 0x20 => out.push_str(&format!("\\u{:04x}", c as u32)),
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+    out
 }
 
 /// Cheap-ish clone of the model for the 4 --auto converters: deep-clone
