@@ -496,7 +496,18 @@ fn convert_segment(
         // (zhhz#14: this restores v0.6 fast-path throughput.)
         if ngram.is_none() {
             if let Some((key_len, value)) = group_longest_prefix(group, rest) {
-                out.push_str(value);
+                // **perf (zhhz#24, N)**: when value is ASCII, use a
+                // bulk byte copy via `extend_from_slice`. For ASCII
+                // sources, this avoids the UTF-8 validation pass that
+                // `String::push_str` performs internally. The bytes
+                // come from a Dict's `String` which is guaranteed
+                // valid UTF-8, and `value.is_ascii()` guarantees
+                // each byte is < 0x80 (no multi-byte chars).
+                if value.is_ascii() {
+                    unsafe_push_str_ascii(out, value);
+                } else {
+                    out.push_str(value);
+                }
                 pos += key_len;
                 continue;
             }
@@ -614,6 +625,32 @@ fn tail_2_chars(s: &str) -> String {
         String::new()
     } else {
         s[start..].to_string()
+    }
+}
+
+/// SAFETY: caller must guarantee `value.is_ascii()`. Under that
+/// precondition, each byte of `value` is < 0x80 and can be safely
+/// copied as raw bytes into the output buffer (which holds valid
+/// UTF-8). This skips `String::push_str`'s UTF-8 validation pass.
+#[inline]
+fn unsafe_push_str_ascii(out: &mut String, value: &str) {
+    debug_assert!(value.is_ascii());
+    // SAFETY: see function-level doc.
+    // Append via the Vec representation of String. String's underlying
+    // Vec<u8> is exposed via `as_mut_vec`, which returns a `&mut Vec<u8>`
+    // (safe API).
+    let bytes = value.as_bytes();
+    let old_len = out.len();
+    let new_len = old_len + bytes.len();
+    if new_len > out.capacity() {
+        out.reserve(new_len - old_len);
+    }
+    // SAFETY: dst is within the Vec's allocated region; src and dst
+    // do not overlap (value is a different String).
+    unsafe {
+        let dst = out.as_mut_vec().as_mut_ptr().add(old_len);
+        std::ptr::copy_nonoverlapping(bytes.as_ptr(), dst, bytes.len());
+        out.as_mut_vec().set_len(new_len);
     }
 }
 
