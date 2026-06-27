@@ -151,3 +151,25 @@ fn ngram_演员出戏了_verb() {
     let got_fast = s2t("演员出戏了");
     assert_eq!(got_fast, "演員出戲了");
 }
+
+// --- Another semantic case where the dict dominates the answer. ---
+
+#[test]
+fn known_limitation_演员一出戏_就喊卡() {
+    // 演员一出戏，导演就喊卡 = "Once the actor breaks character,
+    // the director calls cut." Here "一出戏" is the verb form (出 as
+    // "go out of" / "break"), NOT the measure word "一齣戲".
+    //
+    // STPhrases registers "一出戏 → 一齣戲" (single value), so FMM
+    // matches the measure-word form and the n-gram never sees the
+    // multi-value "出". Even if STPhrases were multi-value, the
+    // current "first-char-only" disambig rule (the first char is the
+    // same "一" for both cands) would fall back to cands[0] = "一齣戲".
+    //
+    // Lock the current (incorrect) behaviour so we notice if the fix
+    // (per-position disambig + larger training corpus) lands.
+    let got = s2t("演员一出戏，导演就喊卡");
+    assert_eq!(got, "演員一齣戲，導演就喊卡");
+    let got_bigram = s2t_bigram("演员一出戏，导演就喊卡");
+    assert_eq!(got_bigram, "演員一齣戲，導演就喊卡");
+}
