@@ -160,16 +160,34 @@ fn known_limitation_演员一出戏_就喊卡() {
     // the director calls cut." Here "一出戏" is the verb form (出 as
     // "go out of" / "break"), NOT the measure word "一齣戲".
     //
-    // STPhrases registers "一出戏 → 一齣戲" (single value), so FMM
-    // matches the measure-word form and the n-gram never sees the
-    // multi-value "出". Even if STPhrases were multi-value, the
-    // current "first-char-only" disambig rule (the first char is the
-    // same "一" for both cands) would fall back to cands[0] = "一齣戲".
+    // The v0.7.1 patch overlay promotes "一出戏" in STPhrases to
+    // multi-value ["一齣戲", "一出戲"], which means FMM now exposes
+    // the ambiguity. However the n-gram model lacks P(*|员一) entries
+    // (sparse even in the trigram) so disambig still falls back to
+    // cands[0] = "一齣戲".
     //
-    // Lock the current (incorrect) behaviour so we notice if the fix
-    // (per-position disambig + larger training corpus) lands.
+    // To force the correct answer today, use a custom-dict entry:
+    //
+    //     演员一出戏	演員一出戲
+    //
+    // (see `custom_dict_演员一出戏_verb` below). The proper long-term
+    // fix is per-position disambig + a domain-specific corpus.
     let got = s2t("演员一出戏，导演就喊卡");
     assert_eq!(got, "演員一齣戲，導演就喊卡");
     let got_bigram = s2t_bigram("演员一出戏，导演就喊卡");
     assert_eq!(got_bigram, "演員一齣戲，導演就喊卡");
+}
+
+#[test]
+fn custom_dict_演员一出戏_verb() {
+    // Workaround for the limitation above: a custom-dict entry
+    // forces the verb form for "演员一出戏". This is the recommended
+    // escape hatch until per-position disambig + better corpus land.
+    use zhhz::Config::S2t;
+    use zhhz::Converter;
+    let c = Converter::with_custom(
+        S2t,
+        &[("演员一出戏".to_string(), "演員一出戲".to_string())],
+    );
+    assert_eq!(c.convert("演员一出戏，导演就喊卡"), "演員一出戲，導演就喊卡");
 }

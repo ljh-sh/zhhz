@@ -70,6 +70,22 @@ impl Dict {
         d
     }
 
+    /// Merge a patch overlay onto a base dictionary text, then build a
+    /// `Dict`. The base is the upstream OpenCC `.txt` (single- or
+    /// multi-value lines). The patches overlay has the same format; for
+    /// any key present in both, the patch's value list **replaces** the
+    /// base's value list (rather than appending), so a single-value base
+    /// entry can be promoted to multi-value via a patch.
+    ///
+    /// Comment / blank lines in either file are ignored. This is the
+    /// intended way to fix known FMM-bias limitations (e.g. turning
+    /// "一出戏 → 一齣戲" into "一出戏 → 一齣戲 一出戲") without forking
+    /// the upstream data directory.
+    pub fn from_text_with_patches(base: &str, patches: &str) -> Self {
+        let merged = merge_dict_patches(base, patches);
+        Self::from_text(&merged)
+    }
+
     /// Build a dictionary from explicit `(key, value)` entries (e.g. user
     /// custom words; later entries win on duplicate keys).
     pub fn from_entries(entries: &[(String, String)]) -> Self {
@@ -191,6 +207,51 @@ pub fn group_longest_prefix<'a>(group: &'a [Dict], text: &str) -> Option<(usize,
         }
     }
     None
+}
+
+/// Merge patch lines onto a base dictionary text. For each line in
+/// `patches` of the form `key<TAB>value1 value2 ...`, the matching
+/// (by key) line in `base` is replaced. Lines in `patches` with no
+/// corresponding key in `base` are appended at the end. Comment lines
+/// (`#`) and blank lines are ignored in both inputs.
+pub(crate) fn merge_dict_patches(base: &str, patches: &str) -> String {
+    use std::collections::HashSet;
+    // Collect the set of keys being patched; their base lines are
+    // dropped (then re-emitted from patches at the end of the output,
+    // so the patch order is the source of truth for the value list).
+    let mut patched_keys: HashSet<String> = HashSet::new();
+    let mut patch_lines: Vec<String> = Vec::new();
+    for line in patches.lines() {
+        let line = line.trim_end_matches('\r');
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        if let Some((key, _vals)) = line.split_once('\t') {
+            patched_keys.insert(key.to_string());
+            patch_lines.push(line.to_string());
+        }
+    }
+    // Emit the header comment of the base unchanged, then every base
+    // line whose key is NOT being patched, then all patch lines.
+    let mut out = String::new();
+    for line in base.lines() {
+        let line = line.trim_end_matches('\r');
+        let key = line
+            .split_once('\t')
+            .map(|(k, _)| k)
+            .filter(|k| !k.is_empty() && !k.starts_with('#'));
+        let drop = matches!(key, Some(k) if patched_keys.contains(k));
+        if drop {
+            continue;
+        }
+        out.push_str(line);
+        out.push('\n');
+    }
+    for line in &patch_lines {
+        out.push_str(line);
+        out.push('\n');
+    }
+    out
 }
 
 /// Group longest-prefix with multi-value candidates (for n-gram disambig).

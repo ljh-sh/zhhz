@@ -48,6 +48,29 @@ pub fn dict_text(name: &str) -> Option<&'static str> {
     Some(raw)
 }
 
+/// Patch overlay for `STPhrases`. Each non-comment, non-blank line is
+/// `key<TAB>value1 value2 ...` and **replaces** the corresponding entry
+/// in the upstream `STPhrases.txt`. Used to promote single-value entries
+/// to multi-value (e.g. `一出戏 → 一齣戲` becomes `一出戏 → 一齣戲 一出戲`)
+/// without forking the upstream data directory.
+const ST_PHRASES_PATCH: &str = include_str!("../data/dictionary_patches/STPhrases.multi-value.tsv");
+
+/// Same as [`dict_text`], but for `STPhrases` returns the upstream text
+/// merged with the in-tree patch overlay. For all other names behaves
+/// identically to `dict_text`.
+pub fn dict_text_patched(name: &str) -> Option<String> {
+    match name {
+        "STPhrases" => {
+            let base = dict_text("STPhrases")?;
+            // The merge is a small string op; doing it here at startup
+            // (once) is fine. The result is a `String` rather than a
+            // `&'static str` because the merge allocates.
+            Some(crate::dict::merge_dict_patches(base, ST_PHRASES_PATCH))
+        }
+        other => dict_text(other).map(str::to_string),
+    }
+}
+
 /// Resolve a config base name (e.g. `s2t`, `tw2sp`) to its embedded JSON text.
 pub fn config_text(name: &str) -> Option<&'static str> {
     let raw = match name {

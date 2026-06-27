@@ -92,9 +92,11 @@ fn expand(spec: &Value, out: &mut Vec<Dict>) -> Result<(), String> {
                 .trim_end_matches(".ocd2")
                 .trim_end_matches(".ocd")
                 .trim_end_matches(".txt");
-            let raw = data::dict_text(name)
+            // STPhrases picks up the multi-value patch overlay; all
+            // other dicts read the upstream text directly.
+            let raw = data::dict_text_patched(name)
                 .ok_or_else(|| format!("unknown embedded dictionary: {name}"))?;
-            out.push(Dict::from_text(raw));
+            out.push(Dict::from_text(&raw));
         }
         "inline" => {
             let entries = spec
