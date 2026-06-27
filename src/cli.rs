@@ -53,12 +53,16 @@ OPTIONS:
         --trigram           (Default when --ngram is given without
                              --bigram / --fast.) Use a 3-gram model for
                              multi-value disambig. Implies --ngram.
-        --report <PATH>     Write a sidecar JSON file listing every
+        --report <PATH>     Write a sidecar TSV file listing every
                              multi-value position the engine encountered
                              (with left/right context, candidates, and
                              what was picked). Intended for LLM /
                              encoder / human review post-processing.
-                             Does not affect the converted output.
+                             Format: `# source`, `# output` comment
+                             lines + one TSV row per decision
+                             (`pos | key | left | right | picked |
+                             candidates(|joined)`). Does not affect
+                             the converted output.
         --files-from <PATH|->  Read a newline-separated list of paths from
                              a file or stdin ('-'). Directories are walked
                              recursively.
@@ -487,62 +491,60 @@ fn run_cli(cli: Cli) -> Result<()> {
     Ok(())
 }
 
-/// Serialize a `ConvertReport` to JSON. The format is intentionally
-/// simple (not a streaming format) — these files are small (one per
-/// input, typically <10 KB) and the consumer is an LLM or human.
+/// Serialize a `ConvertReport` to TSV. One row per multi-value
+/// decision, plus two comment lines at the top with the source and
+/// output text. Format (after the two `#` comment lines):
+///
+/// ```text
+/// pos\tkey\tleft\tright\tpicked\tcandidates(|joined)
+/// 3\t出戏\t这\t真好看\t出戲\t出戲|齣戲
+/// ```
+///
+/// The `#` lines preserve the full source / output for the LLM
+/// without bloating each row. The `candidates` column uses `|` as
+/// the in-cell separator because `|` never appears in Chinese text.
+/// TSV is much smaller than JSON for LLM input — roughly 1/3 the
+/// tokens — which matters when we're paying per-token.
 fn write_report(
     path: &Path,
     source: &str,
     output: &str,
     decisions: &[crate::engine::AmbiguousDecision],
 ) -> Result<()> {
-    let mut s = String::from("{\n");
-    s.push_str(&format!("  \"source\": {},\n", json_string(source)));
-    s.push_str(&format!("  \"output\": {},\n", json_string(output)));
-    s.push_str("  \"decisions\": [\n");
-    for (i, d) in decisions.iter().enumerate() {
-        if i > 0 {
-            s.push_str(",\n");
-        }
+    let mut s = String::new();
+    s.push_str(&format!("# source\t{}\n", tsv_escape(source)));
+    s.push_str(&format!("# output\t{}\n", tsv_escape(output)));
+    s.push_str("pos\tkey\tleft\tright\tpicked\tcandidates\n");
+    for d in decisions {
+        let cands = d.candidates.join("|");
         s.push_str(&format!(
-            "    {{\"src_pos\": {}, \"src_key\": {}, \"candidates\": [{}], \
-             \"left_context\": {}, \"right_context\": {}, \"picked\": {}}}",
+            "{}\t{}\t{}\t{}\t{}\t{}\n",
             d.src_pos,
-            json_string(&d.src_key),
-            d.candidates
-                .iter()
-                .map(|c| json_string(c))
-                .collect::<Vec<_>>()
-                .join(", "),
-            json_string(&d.left_context),
-            json_string(&d.right_context),
-            json_string(&d.picked),
+            tsv_escape(&d.src_key),
+            tsv_escape(&d.left_context),
+            tsv_escape(&d.right_context),
+            tsv_escape(&d.picked),
+            tsv_escape(&cands),
         ));
     }
-    s.push_str("\n  ]\n}\n");
     std::fs::write(path, s.as_bytes())
         .with_context(|| format!("failed to write report {}", path.display()))?;
     Ok(())
 }
 
-/// Minimal JSON string escaping (only what we need for Chinese
-/// characters and quotes). Avoiding the `serde` dependency to keep
-/// the binary small.
-fn json_string(s: &str) -> String {
-    let mut out = String::with_capacity(s.len() + 2);
-    out.push('"');
+/// TSV field escape: replace `\n`, `\r`, `\t` so the field doesn't
+/// break the row layout. The result is a single-line string with
+/// these chars replaced by their 2-char escape.
+fn tsv_escape(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
     for c in s.chars() {
         match c {
-            '"' => out.push_str("\\\""),
-            '\\' => out.push_str("\\\\"),
             '\n' => out.push_str("\\n"),
             '\r' => out.push_str("\\r"),
             '\t' => out.push_str("\\t"),
-            c if (c as u32) < 0x20 => out.push_str(&format!("\\u{:04x}", c as u32)),
             c => out.push(c),
         }
     }
-    out.push('"');
     out
 }
 
