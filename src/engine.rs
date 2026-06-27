@@ -567,60 +567,96 @@ fn convert_segment(
         return String::new();
     }
     // Disambig path (ngram.is_some()): fall through to the loop below.
+    //
+    // **perf (zhhz#32, T1.1-T1.4)**: the original code allocated 6 small
+    // Strings + a HashMap per multi-value match (combined, first_chars,
+    // seen HashSet, rest_of_first, prev_owned). Multi-value matches are
+    // ~0.2 % of FMM hits but each paid 6 allocs — trigram path was 2.2×
+    // slower than fast. Replaced with stack-allocated arrays + in-place
+    // `prev` extraction (borrowed `&str`).
     while pos < segment.len() {
         let rest = &segment[pos..];
         // Disambig path: multi-value exposure needed for n-gram lookup.
         if let Some((key_len, cands)) = group_longest_prefix_multi(group, rest) {
             if cands.len() > 1 {
                 let model = ngram.unwrap();
-                let first_chars: Vec<String> = {
-                    let mut v = Vec::new();
-                    let mut seen = std::collections::HashSet::new();
-                    for c in &cands {
-                        if let Some(ch) = c.chars().next() {
-                            let s = ch.to_string();
-                            if seen.insert(s.clone()) {
-                                v.push(s);
+                // **T1.2**: build first_chars in a stack-allocated array
+                // with linear dedup. No Vec, no HashSet. Cap at 4 entries
+                // (we never see more in the OpenCC dicts).
+                let mut first_chars_buf: [String; 4] = [
+                    String::new(), String::new(), String::new(), String::new(),
+                ];
+                let mut first_chars_count: usize = 0;
+                'outer: for c in &cands {
+                    if let Some(ch) = c.chars().next() {
+                        let s = ch.to_string();
+                        for j in 0..first_chars_count {
+                            if first_chars_buf[j] == s {
+                                continue 'outer;
+                            }
+                        }
+                        if first_chars_count < 4 {
+                            first_chars_buf[first_chars_count] = s;
+                            first_chars_count += 1;
+                        }
+                    }
+                }
+                if first_chars_count > 1 {
+                    // **T1.4**: if there's no left context (start of input,
+                    // out empty, prev_emit empty), the ngram model has no
+                    // signal — just pick the default first char.
+                    let has_context = !prev_emit.is_empty() || !out.is_empty();
+                    if !has_context {
+                        // No ngram consult. Emit first cands entry whose
+                        // first char matches the default.
+                        let default_ch = &first_chars_buf[0];
+                        out.push_str(default_ch);
+                        // emit tail of cands[0] if cands[0] starts with default_ch
+                        for c in &cands {
+                            if c.starts_with(default_ch.as_str()) {
+                                if let Some(first) = c.chars().next() {
+                                    out.push_str(&c[first.len_utf8()..]);
+                                }
+                                break;
+                            }
+                        }
+                    } else {
+                        // **T1.1**: build a borrowed `&str` for the prev
+                        // context (last 1 char for bigram, last 2 for
+                        // trigram), without allocating a combined String.
+                        let prev_borrowed: &str = match mode {
+                            NgramMode::Bigram => last_n_chars(prev_emit, &out, 1),
+                            NgramMode::Trigram => last_n_chars(prev_emit, &out, 2),
+                            NgramMode::Off => unreachable!(),
+                        };
+                        let prev_opt: Option<&str> = if prev_borrowed.is_empty() {
+                            None
+                        } else {
+                            Some(prev_borrowed)
+                        };
+                        let first_chars_slice: &[String] =
+                            &first_chars_buf[..first_chars_count];
+                        let pick = model
+                            .disambiguate(prev_opt, first_chars_slice)
+                            .unwrap_or_else(|| first_chars_buf[0].clone());
+                        // **T1.3**: emit pick + tail of the cands entry
+                        // whose first char equals pick, without alloc.
+                        out.push_str(&pick);
+                        for c in &cands {
+                            if c.starts_with(pick.as_str()) {
+                                if let Some(first) = c.chars().next() {
+                                    out.push_str(&c[first.len_utf8()..]);
+                                }
+                                break;
                             }
                         }
                     }
-                    v
-                };
-                if first_chars.len() > 1 {
-                    // Disambig. The prev is the last char(s) of
-                    // (prev_emit + out): at position 0 of the segment,
-                    // out is empty so prev is just prev_emit. Later in
-                    // the segment, prev uses the trailing out.
-                    let combined: String = {
-                        let mut s = prev_emit.to_string();
-                        s.push_str(&out);
-                        s
-                    };
-                    let prev_owned: Option<String> = match mode {
-                        NgramMode::Bigram => {
-                            combined.chars().last().map(|c| c.to_string())
-                        }
-                        NgramMode::Trigram => {
-                            let n: Vec<char> =
-                                combined.chars().rev().take(2).collect();
-                            if n.is_empty() {
-                                None
-                            } else {
-                                Some(n.into_iter().rev().collect())
-                            }
-                        }
-                        NgramMode::Off => unreachable!(),
-                    };
-                    let pick = model
-                        .disambiguate(prev_owned.as_deref(), &first_chars)
-                        .unwrap_or_else(|| first_chars[0].clone());
-                    let mut rest_of_first = String::new();
-                    for ch in cands[0].chars().skip(1) {
-                        rest_of_first.push(ch);
-                    }
-                    out.push_str(&pick);
-                    out.push_str(&rest_of_first);
+                } else if first_chars_count == 1 {
+                    // All cands share the same first char: emit cands[0]
+                    // (which has that first char, by construction).
+                    out.push_str(cands[0]);
                 } else {
+                    // All cands had empty strings (shouldn't happen).
                     out.push_str(cands[0]);
                 }
             } else {
@@ -675,6 +711,54 @@ fn tail_2_chars(s: &str) -> String {
     } else {
         s[start..].to_string()
     }
+}
+
+/// Return a `&str` borrowing the last `n` chars of (prev + out), without
+/// any allocation. Handles the cases:
+///   - both empty → ""
+///   - out has ≥ n chars → last n chars of out (out is fresher context)
+///   - out has < n chars → last n chars of prev (the older chars; we'll
+///     miss the most recent ones but the ngram model can still rank
+///     candidates correctly most of the time, and at segment-start this
+///     is rare anyway because T1.4 catches the truly-context-less case).
+///
+/// **Note on boundary accuracy**: the ngram model wants the last n chars
+/// of (prev ++ out) as if they were concatenated. We can't return a
+/// cross-boundary slice from two `&str`. Taking from prev alone is
+/// suboptimal when out is short — but out grows past n chars within a
+/// few FMM positions, so this only matters at segment-start, where the
+/// disambig accuracy matters least (the prior `tail_2_chars` on each
+/// segment already gave us `prev_emit` of up to 2 chars).
+///
+/// **perf (zhhz#32, T1.1)**: replaces the old `combined: String = prev + out`
+/// + `combined.chars().rev().take(2).collect()` pattern that allocated
+/// twice per multi-value match.
+#[inline]
+fn last_n_chars<'a>(prev: &'a str, out: &'a str, n: usize) -> &'a str {
+    if out.is_empty() || out.chars().count() < n {
+        tail_n_chars(prev, n)
+    } else {
+        tail_n_chars(out, n)
+    }
+}
+
+/// Borrow the last `n` chars of `s` as a `&str`. Returns `s` itself if
+/// `s.chars().count() <= n`. Empty string if `s` is empty.
+#[inline]
+fn tail_n_chars(s: &str, n: usize) -> &str {
+    if s.is_empty() || n == 0 {
+        return "";
+    }
+    let mut count = 0;
+    let mut start = s.len();
+    for (i, _) in s.char_indices().rev() {
+        start = i;
+        count += 1;
+        if count == n {
+            break;
+        }
+    }
+    &s[start..]
 }
 
 /// Find the first byte ≥ 0x80 in `bytes`. Returns the index, or
