@@ -125,19 +125,22 @@ jobs:
         with:
           cache-on-failure: true
 
-      - name: Run tests
-        run: |
-          cargo test --release --locked --target ${{ matrix.target }} \
-            --no-fail-fast 2>&1 | tee test-output.txt
-          echo "EXIT=${PIPESTATUS[0]}" > test-exit.txt
-
       - name: Build test artefacts
+        # Build first so we always produce perf_only + diff_corpus even
+        # if `cargo test` fails (the report shows green build but
+        # red tests in that case).
         run: |
           cargo build --release --locked --target ${{ matrix.target }} \
             --example perf_only --example diff_corpus
           mkdir -p out/bin
           cp target/${{ matrix.target }}/release/examples/perf_only out/bin/ 2>/dev/null || true
           cp target/${{ matrix.target }}/release/examples/diff_corpus out/bin/ 2>/dev/null || true
+
+      - name: Run tests
+        run: |
+          cargo test --release --locked --target ${{ matrix.target }} \
+            --no-fail-fast 2>&1 | tee test-output.txt
+          echo "EXIT=${PIPESTATUS[0]}" > test-exit.txt
 
       - name: Upload
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
