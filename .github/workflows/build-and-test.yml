@@ -168,7 +168,11 @@ jobs:
         with:
           path: artefacts
           pattern: test-*
-          merge-multiple: true
+          # Do NOT merge-multiple: we want each artefact in its own
+          # subdir so summarise-tests.py can find them by platform.
+
+      - name: List downloaded artefacts (debug)
+        run: find artefacts -maxdepth 3 -type f | head -40
 
       - name: Build test-report markdown
         id: build

@@ -37,6 +37,13 @@ def parse_platform(artefact_dir: Path):
     perf = (bin_dir / "perf_only").exists()
     diff = (bin_dir / "diff_corpus").exists()
     if not test_out.exists():
+        # Debug: list what's actually there so we can see flat vs nested layout.
+        if artefact_dir.exists():
+            listing = ", ".join(p.name for p in sorted(artefact_dir.iterdir())[:10])
+        else:
+            listing = "(dir does not exist)"
+        print(f"::warning::{artefact_dir} missing test-output.txt; contents: [{listing}]",
+              file=sys.stderr)
         return ("❌ no artefact", "—", "—")
     content = test_out.read_text(errors="replace")
     # Find the last "test result: ok" or "FAILED" line
