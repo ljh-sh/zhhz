@@ -365,7 +365,7 @@ dependencies = [
 
 [[package]]
 name = "zhhz"
-version = "0.7.4"
+version = "0.7.4-marisa-trie.1"
 dependencies = [
  "anyhow",
  "js-sys",

@@ -1,6 +1,6 @@
 [package]
 name = "zhhz"
-version = "0.7.4"
+version = "0.7.4-marisa-trie.1"
 authors = ["ljh-sh <lijunhao@x-cmd.com>"]
 edition = "2021"
 rust-version = "1.74"
