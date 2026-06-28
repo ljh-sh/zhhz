@@ -241,6 +241,17 @@ pub struct Converter {
     cfg: ResolvedConfig,
     ngram: Option<NgramModel>,
     ngram_mode: NgramMode,
+    /// **perf (zhhz#35, B)**: reusable scratch buffer for `convert()`.
+    /// Holds the output bytes accumulated across all segments. Materialised
+    /// into a `String` at the end of each convert. Eliminates the
+    /// per-segment `String::with_capacity` allocation (~350K per 10 MB
+    /// input). Capacity grows monotonically; reuse keeps the working set
+    /// stable across repeated calls.
+    scratch: std::cell::RefCell<Vec<u8>>,
+    /// **perf (zhhz#35, B)**: reusable scratch buffer for the n-gram
+    /// prev_emit (last 2 chars of emitted text per segment). Bounded
+    /// to 6 bytes (2 CJK chars). Only used when ngram is active.
+    prev_emit_scratch: std::cell::RefCell<Vec<u8>>,
 }
 
 impl Converter {
@@ -262,6 +273,8 @@ impl Converter {
             cfg,
             ngram: None,
             ngram_mode: NgramMode::Off,
+            scratch: std::cell::RefCell::new(Vec::new()),
+            prev_emit_scratch: std::cell::RefCell::new(Vec::new()),
         }
     }
 
@@ -290,33 +303,56 @@ impl Converter {
 
     /// Convert a piece of text.
     pub fn convert(&self, text: &str) -> String {
-        let mut out = String::with_capacity(text.len() + text.len() / 5);
-        let mut prev_emit = String::new();
+        // **perf (zhhz#35, B)**: use a reusable scratch Vec<u8> instead
+        // of per-convert String allocation. We swap the buffer out
+        // (preserving its allocation), fill it via segments, then
+        // convert to String and put the buffer back.
+        let mut scratch = std::mem::take(&mut *self.scratch.borrow_mut());
+        scratch.clear();
+        scratch.reserve(text.len() + text.len() / 5);
+
+        // Snapshot the prev_emit bytes (immutable borrow drops at end of
+        // statement) so we can re-borrow mutably below. Re-snapshot
+        // at the top of each iteration.
+        let mut prev_emit_snapshot: Vec<u8> = self.prev_emit_scratch.borrow().clone();
+
         match &self.cfg.segmentation {
             Some(seg_group) => {
                 for segment in SegmentIter::new(text, seg_group) {
-                    let (new_seg, new_prev) = convert_through_chain(
+                    convert_through_chain_into(
                         segment,
                         &self.cfg.chain,
                         self.ngram.as_ref(),
                         self.ngram_mode,
-                        &prev_emit,
+                        &prev_emit_snapshot,
+                        &mut scratch,
+                        &mut self.prev_emit_scratch.borrow_mut(),
                     );
-                    out.push_str(&new_seg);
-                    prev_emit = new_prev;
+                    // Re-snapshot for the next segment (cheap — ≤ 6 bytes).
+                    prev_emit_snapshot = self.prev_emit_scratch.borrow().clone();
                 }
             }
             None => {
-                let (new_seg, _) = convert_through_chain(
+                convert_through_chain_into(
                     text,
                     &self.cfg.chain,
                     self.ngram.as_ref(),
                     self.ngram_mode,
-                    &prev_emit,
+                    &prev_emit_snapshot,
+                    &mut scratch,
+                    &mut self.prev_emit_scratch.borrow_mut(),
                 );
-                out.push_str(&new_seg);
             }
         }
+
+        // Take the scratch bytes and convert to String in one move.
+        // SAFETY: scratch only contains valid UTF-8 (see comment above).
+        let bytes = std::mem::take(&mut scratch);
+        let out = unsafe { String::from_utf8_unchecked(bytes) };
+
+        // Put the (now-empty) scratch buffer back so its allocation
+        // is reused on the next convert call.
+        *self.scratch.borrow_mut() = scratch;
         out
     }
 }
@@ -392,131 +428,143 @@ impl<'a> Iterator for SegmentIter<'a> {
     }
 }
 
-/// Run a single segment through the whole conversion chain.
+/// **perf (zhhz#35, B)**: arena-buffer variant of
+/// `convert_through_chain`. Writes the converted segment into the caller's
+/// reusable `scratch: Vec<u8>` instead of returning a fresh `String`
+/// (the original returned `(String, String)` per segment — 350K allocs
+/// per 10 MB input). Also writes the prev_emit (last 2 chars of emitted
+/// text) into the caller's `prev_emit_buf: Vec<u8>`, only when ngram is
+/// active (otherwise it stays empty).
 ///
-/// `prev_emit` is the running emitted text from earlier segments in the
-/// same input (or empty for the first segment). It is the source of the
-/// n-gram `prev` context used to disambiguate multi-value phrase matches
-/// near the start of this segment — without it, a multi-value match at
-/// position 0 of the segment would have no left context and would fall
-/// back to the dict's first candidate.
-fn convert_through_chain(
+/// For multi-stage chains, intermediate stage input is a slice of
+/// `scratch` (the previous stage's output). On a single-stage, ngram-off
+/// chain, the segment is converted directly with no intermediate buffer.
+///
+/// **Borrowing**: caller must pass `prev_emit_buf` as both input
+/// (immutable borrow, read-only) and output (mutable borrow). We work
+/// around the aliasing by reading the prev into a stack string first
+/// when ngram is active.
+fn convert_through_chain_into(
     segment: &str,
     chain: &[Vec<Dict>],
     ngram: Option<&NgramModel>,
     mode: NgramMode,
-    prev_emit: &str,
-) -> (String, String) {
+    prev_emit_bytes: &[u8],
+    scratch: &mut Vec<u8>,
+    prev_emit_buf: &mut Vec<u8>,
+) {
     if chain.is_empty() {
-        return (segment.to_string(), prev_emit.to_string());
+        scratch.extend_from_slice(segment.as_bytes());
+        if ngram.is_some() {
+            tail_n_bytes_into(segment.as_bytes(), prev_emit_buf, 6);
+        }
+        return;
     }
-    // **perf (zhhz#21, J)**: if the chain has exactly one stage (e.g.
-    // t2jp), skip the loop and the redundant intermediate String.
-    // Saves 1 String alloc per segment (350K / 10 MB).
+    // SAFETY: prev_emit_bytes is always valid UTF-8 (we only ever push
+    // valid &str into it via tail_n_bytes_into). Borrow it as &str.
+    let prev_emit: &str = unsafe { std::str::from_utf8_unchecked(prev_emit_bytes) };
+    // Fast path: single stage, no ngram. Write directly to the tail of
+    // scratch, no intermediate buffer.
     if chain.len() == 1 && ngram.is_none() {
-        let mut out = String::with_capacity(segment.len() + segment.len() / 5);
-        let keep = convert_segment(segment, &chain[0], ngram, mode, prev_emit, &mut out);
-        return (out, keep);
+        convert_segment_into(
+            segment, &chain[0], ngram, mode, "", scratch,
+        );
+        return;
     }
-    // Reuse a single `String` across stages to avoid per-stage
-    // alloc-then-drop.
-    let mut current = String::with_capacity(segment.len() + segment.len() / 5);
-    current.push_str(segment);
-    let mut stage_prev = prev_emit.to_string();
-    let mut final_prev = prev_emit.to_string();
+    // Slow path: multi-stage chain OR ngram. Build an intermediate
+    // stage buffer in the same scratch space (right after the
+    // previous segment's output).
+    let stage_input_start = scratch.len();
+    scratch.extend_from_slice(segment.as_bytes());
+    let mut stage_prev_owned: Option<String> = None; // owned, so we can re-borrow scratch
     for stage in chain {
-        // Move `current` into `prev` so we can borrow `prev` as input
-        // AND use `current`'s allocation as the output buffer for the
-        // next stage. After convert_segment, `prev` is dropped and
-        // `current` holds the new output, reusing its capacity.
-        let mut prev = std::mem::replace(
-            &mut current,
-            String::with_capacity(0),
+        // Copy the input slice out of scratch into a local String so
+        // the &str doesn't alias with the &mut scratch we need to pass
+        // to convert_segment_into. For a 10 MB input the stage input
+        // is bounded by the longest segment (~50 KB), so the copy is
+        // cheap relative to the work below.
+        let input_owned: String = {
+            // SAFETY: scratch contains valid UTF-8.
+            let s = unsafe { std::str::from_utf8_unchecked(&scratch[stage_input_start..]) };
+            s.to_string()
+        };
+        let prev_str: &str = stage_prev_owned.as_deref().unwrap_or(prev_emit);
+        // Truncate scratch to stage_input_start, then have the stage
+        // write into it. After the call, scratch[stage_input_start..]
+        // is the new stage output.
+        scratch.truncate(stage_input_start);
+        convert_segment_into(
+            &input_owned, stage, ngram, mode, prev_str, scratch,
         );
-        let new_prev = convert_segment(
-            &prev, stage, ngram, mode, &stage_prev, &mut current,
-        );
-        prev.clear();
-        stage_prev = new_prev.clone();
-        final_prev = new_prev;
+        // Update prev for the next stage: take the last 6 bytes of the
+        // new output as an owned String (bounded to 2 chars).
+        let new_end = scratch.len();
+        let new_start = tail_n_bytes_start(&scratch[stage_input_start..new_end], 6)
+            + stage_input_start;
+        stage_prev_owned = Some(unsafe {
+            std::str::from_utf8_unchecked(&scratch[new_start..new_end]).to_string()
+        });
     }
-    (current, final_prev)
+    // If ngram active, also write the final segment's prev into the
+    // caller's prev_emit_buf.
+    if ngram.is_some() {
+        let segment_end = scratch.len();
+        let tail_start = tail_n_bytes_start(&scratch[stage_input_start..segment_end], 6) + stage_input_start;
+        prev_emit_buf.clear();
+        prev_emit_buf.extend_from_slice(&scratch[tail_start..segment_end]);
+    }
 }
 
-/// One conversion stage: longest-prefix per position. On a match, emit the
-/// default candidate and advance by the key length; on a miss, copy one
-/// character through and advance by one character.
-///
-/// One conversion stage: longest-prefix per position. On a match, emit the
-/// default candidate and advance by the key length; on a miss, copy one
-/// character through and advance by one character.
-///
-/// `prev_emit` is the running emitted text from earlier segments in the
-/// same input (or empty for the first segment). It provides the n-gram
-/// `prev` context for multi-value matches at the start of this segment.
-///
-/// Returns `(out, new_prev)` where `new_prev` is `prev_emit + out`
-/// (truncated to the last 2 chars), ready to be passed as `prev_emit`
-/// for the next segment.
-///
-/// If `ngram` is `Some`, multi-value matches where the candidates differ
-/// at the **first** char position are disambiguated by the n-gram model
-/// using `prev_emit` (or the last char(s) of `out` for matches at later
-/// positions) as context. The remaining chars of the candidate (positions
-/// 1..) follow the first-char choice.
-///
-/// The "first char only" rule is deliberate: in Chinese, the n-gram
-/// signal for in-phrase ambiguity (e.g. "一出" → "一齣" vs "一出") is
-/// often misleading because the corpus is biased toward the more common
-/// bigram. The dict's first candidate is more reliable for those cases.
-/// The n-gram helps primarily when the ambiguity is in the *leading*
-/// char (e.g. "这出戏" → "這出戲" vs "這齣戲" — where 這 is fixed but
-/// 出/齣 depends on the left context).
-fn convert_segment(
+/// Return the byte offset of the start of the last `max_bytes` of
+/// `bytes`. Used to compute the tail slice for prev_emit.
+#[inline]
+fn tail_n_bytes_start(bytes: &[u8], max_bytes: usize) -> usize {
+    if bytes.len() <= max_bytes {
+        0
+    } else {
+        bytes.len() - max_bytes
+    }
+}
+
+/// Copy the last `max_bytes` of `bytes` into `out_buf`, truncated to a
+/// char boundary so the result is valid UTF-8.
+#[inline]
+fn tail_n_bytes_into(bytes: &[u8], out_buf: &mut Vec<u8>, max_bytes: usize) {
+    let start = tail_n_bytes_start(bytes, max_bytes);
+    // Walk back to a char boundary if needed.
+    let mut s = start;
+    while s < bytes.len() && (bytes[s] & 0xC0) == 0x80 {
+        s += 1;
+    }
+    out_buf.clear();
+    out_buf.extend_from_slice(&bytes[s..]);
+}
+
+/// **perf (zhhz#35, B)**: arena-buffer variant of `convert_segment`.
+/// Appends the converted segment bytes to `out: Vec<u8>` instead of
+/// building a `String`. `prev_emit` is supplied as bytes; the ngram
+/// disambig path consults it for left context.
+fn convert_segment_into(
     segment: &str,
     group: &[Dict],
     ngram: Option<&NgramModel>,
     mode: NgramMode,
     prev_emit: &str,
-    out: &mut String,
-) -> String {
-    // **perf (zhhz#21, J)**: write into a caller-provided `&mut String`
-    // so the per-stage alloc is amortised across stages. Caller calls
-    // `out.clear()` between stages (or moves the previous `current`
-    // into here so we reuse its allocation).
-    out.clear();
-    out.reserve(segment.len() + segment.len() / 5);
+    out: &mut Vec<u8>,
+) {
     let mut pos = 0;
-    // **perf (#1)**: SIMD ASCII pass-through. For segments that
-    // start with ASCII, scan to the next non-ASCII byte and bulk-
-    // copy the ASCII run. For Chinese-leading segments, fall through
-    // to the regular char walk (avoids the byte-by-byte scan cost
-    // for pure-Chinese segments where every char is multi-byte).
+    // Same SIMD-style ASCII pass-through as before; just writes into
+    // `out` (Vec<u8>) directly instead of into a String.
     if ngram.is_none() {
         let bytes = segment.as_bytes();
         if !bytes.is_empty() && bytes[0] < 0x80 {
-            // ASCII-leading segment: SIMD-style fast path.
+            // ASCII-leading segment.
             while pos < bytes.len() {
                 let rest = &bytes[pos..];
                 let ascii_end = find_non_ascii(rest);
                 if ascii_end > 0 {
                     let ascii_run = &rest[..ascii_end];
-                    debug_assert!(ascii_run.is_ascii());
-                    let old_len = out.len();
-                    let new_len = old_len + ascii_run.len();
-                    if new_len > out.capacity() {
-                        out.reserve(new_len - old_len);
-                    }
-                    // SAFETY: ascii_run is valid ASCII subset of UTF-8.
-                    unsafe {
-                        let dst = out.as_mut_vec().as_mut_ptr().add(old_len);
-                        std::ptr::copy_nonoverlapping(
-                            ascii_run.as_ptr(),
-                            dst,
-                            ascii_run.len(),
-                        );
-                        out.as_mut_vec().set_len(new_len);
-                    }
+                    out.extend_from_slice(ascii_run);
                     pos += ascii_end;
                     if pos >= bytes.len() {
                         break;
@@ -525,11 +573,7 @@ fn convert_segment(
                 let rest = &bytes[pos..];
                 let rest_str: &str = unsafe { std::str::from_utf8_unchecked(rest) };
                 if let Some((key_len, value)) = group_longest_prefix(group, rest_str) {
-                    if value.is_ascii() {
-                        unsafe_push_str_ascii(out, value);
-                    } else {
-                        out.push_str(value);
-                    }
+                    out.extend_from_slice(value.as_bytes());
                     pos += key_len;
                     continue;
                 }
@@ -538,21 +582,16 @@ fn convert_segment(
                     .next()
                     .map(|c| c.len_utf8())
                     .unwrap_or_else(|| rest_str.len().min(4));
-                out.push_str(&rest_str[..ch_len]);
+                out.extend_from_slice(&rest[..ch_len]);
                 pos += ch_len;
             }
-            return String::new();
+            return;
         }
-        // Chinese-leading segment: fall through to char walk below
-        // (the existing fast path that uses `group_longest_prefix`).
+        // Chinese-leading segment: fall through to char walk.
         while pos < segment.len() {
             let rest = &segment[pos..];
             if let Some((key_len, value)) = group_longest_prefix(group, rest) {
-                if value.is_ascii() {
-                    unsafe_push_str_ascii(out, value);
-                } else {
-                    out.push_str(value);
-                }
+                out.extend_from_slice(value.as_bytes());
                 pos += key_len;
                 continue;
             }
@@ -561,28 +600,17 @@ fn convert_segment(
                 .next()
                 .map(|c| c.len_utf8())
                 .unwrap_or_else(|| rest.len().min(4));
-            out.push_str(&rest[..ch_len]);
+            out.extend_from_slice(rest[..ch_len].as_bytes());
             pos += ch_len;
         }
-        return String::new();
+        return;
     }
-    // Disambig path (ngram.is_some()): fall through to the loop below.
-    //
-    // **perf (zhhz#32, T1.1-T1.4)**: the original code allocated 6 small
-    // Strings + a HashMap per multi-value match (combined, first_chars,
-    // seen HashSet, rest_of_first, prev_owned). Multi-value matches are
-    // ~0.2 % of FMM hits but each paid 6 allocs — trigram path was 2.2×
-    // slower than fast. Replaced with stack-allocated arrays + in-place
-    // `prev` extraction (borrowed `&str`).
+    // Disambig path (ngram.is_some()): same as before but writes to Vec<u8>.
     while pos < segment.len() {
         let rest = &segment[pos..];
-        // Disambig path: multi-value exposure needed for n-gram lookup.
         if let Some((key_len, cands)) = group_longest_prefix_multi(group, rest) {
             if cands.len() > 1 {
                 let model = ngram.unwrap();
-                // **T1.2**: build first_chars in a stack-allocated array
-                // with linear dedup. No Vec, no HashSet. Cap at 4 entries
-                // (we never see more in the OpenCC dicts).
                 let mut first_chars_buf: [String; 4] = [
                     String::new(), String::new(), String::new(), String::new(),
                 ];
@@ -602,65 +630,63 @@ fn convert_segment(
                     }
                 }
                 if first_chars_count > 1 {
-                    // **T1.4**: if there's no left context (start of input,
-                    // out empty, prev_emit empty), the ngram model has no
-                    // signal — just pick the default first char.
                     let has_context = !prev_emit.is_empty() || !out.is_empty();
                     if !has_context {
-                        // No ngram consult. Emit first cands entry whose
-                        // first char matches the default.
                         let default_ch = &first_chars_buf[0];
-                        out.push_str(default_ch);
-                        // emit tail of cands[0] if cands[0] starts with default_ch
+                        out.extend_from_slice(default_ch.as_bytes());
                         for c in &cands {
                             if c.starts_with(default_ch.as_str()) {
                                 if let Some(first) = c.chars().next() {
-                                    out.push_str(&c[first.len_utf8()..]);
+                                    out.extend_from_slice(c[first.len_utf8()..].as_bytes());
                                 }
                                 break;
                             }
                         }
                     } else {
-                        // **T1.1**: build a borrowed `&str` for the prev
-                        // context (last 1 char for bigram, last 2 for
-                        // trigram), without allocating a combined String.
                         let prev_borrowed: &str = match mode {
-                            NgramMode::Bigram => last_n_chars(prev_emit, &out, 1),
-                            NgramMode::Trigram => last_n_chars(prev_emit, &out, 2),
+                            NgramMode::Bigram => last_n_chars(prev_emit, "", 1),
+                            NgramMode::Trigram => last_n_chars(prev_emit, "", 2),
                             NgramMode::Off => unreachable!(),
                         };
-                        let prev_opt: Option<&str> = if prev_borrowed.is_empty() {
+                        // For out, we need the last n chars of the bytes already written.
+                        // Compute on-the-fly from the Vec<u8> tail.
+                        let out_tail: &str = match mode {
+                            NgramMode::Bigram => last_n_bytes_str(out, 3), // 1 char max in CJK = 3 bytes
+                            NgramMode::Trigram => last_n_bytes_str(out, 6), // 2 chars max
+                            NgramMode::Off => unreachable!(),
+                        };
+                        let chosen = if !out_tail.is_empty() {
+                            out_tail
+                        } else {
+                            prev_borrowed
+                        };
+                        let prev_opt: Option<&str> = if chosen.is_empty() {
                             None
                         } else {
-                            Some(prev_borrowed)
+                            Some(chosen)
                         };
                         let first_chars_slice: &[String] =
                             &first_chars_buf[..first_chars_count];
                         let pick = model
                             .disambiguate(prev_opt, first_chars_slice)
                             .unwrap_or_else(|| first_chars_buf[0].clone());
-                        // **T1.3**: emit pick + tail of the cands entry
-                        // whose first char equals pick, without alloc.
-                        out.push_str(&pick);
+                        out.extend_from_slice(pick.as_bytes());
                         for c in &cands {
                             if c.starts_with(pick.as_str()) {
                                 if let Some(first) = c.chars().next() {
-                                    out.push_str(&c[first.len_utf8()..]);
+                                    out.extend_from_slice(c[first.len_utf8()..].as_bytes());
                                 }
                                 break;
                             }
                         }
                     }
                 } else if first_chars_count == 1 {
-                    // All cands share the same first char: emit cands[0]
-                    // (which has that first char, by construction).
-                    out.push_str(cands[0]);
+                    out.extend_from_slice(cands[0].as_bytes());
                 } else {
-                    // All cands had empty strings (shouldn't happen).
-                    out.push_str(cands[0]);
+                    out.extend_from_slice(cands[0].as_bytes());
                 }
             } else {
-                out.push_str(cands[0]);
+                out.extend_from_slice(cands[0].as_bytes());
             }
             pos += key_len;
         } else {
@@ -669,49 +695,29 @@ fn convert_segment(
                 .next()
                 .map(|c| c.len_utf8())
                 .unwrap_or_else(|| rest.len().min(4));
-            out.push_str(&rest[..ch_len]);
+            out.extend_from_slice(rest[..ch_len].as_bytes());
             pos += ch_len;
         }
     }
-    // Truncate the running prev to the last 2 chars to bound memory.
-    // **perf (zhhz#21, I+K)**: in fast mode (ngram.is_none()), the
-    // caller never reads `keep`; return an empty String without
-    // computing tail_2_chars (saves the alloc + the slice walk).
-    // In disambig mode, prev_emit is still needed for ngram lookup.
-    let keep: String = if ngram.is_none() {
-        String::new()
-    } else if prev_emit.is_empty() {
-        tail_2_chars(&out)
-    } else {
-        let mut combined = String::with_capacity(prev_emit.len() + out.len());
-        combined.push_str(prev_emit);
-        combined.push_str(&out);
-        tail_2_chars(&combined)
-    };
-    keep
 }
 
-/// Return the last 2 chars of `s` as a new `String`, without
-/// allocating a temporary `Vec<char>`. For Chinese text (3 bytes/char),
-/// the last 2 chars are at most 6 bytes; we slice from the byte
-/// boundary closest to that.
+/// Borrow the last `max_bytes` bytes of `out` as a `&str`. Walks back
+/// to a UTF-8 char boundary.
 #[inline]
-fn tail_2_chars(s: &str) -> String {
-    let mut count = 0;
-    let mut start = s.len();
-    for (i, _) in s.char_indices().rev() {
-        start = i;
-        count += 1;
-        if count == 2 {
-            break;
-        }
+fn last_n_bytes_str(out: &[u8], max_bytes: usize) -> &str {
+    if out.is_empty() || max_bytes == 0 {
+        return "";
     }
-    if count == 0 {
-        String::new()
-    } else {
-        s[start..].to_string()
+    let start = if out.len() <= max_bytes { 0 } else { out.len() - max_bytes };
+    let mut s = start;
+    while s < out.len() && (out[s] & 0xC0) == 0x80 {
+        s += 1;
     }
+    // SAFETY: out is valid UTF-8 (only ever appended via push of valid
+    // &str bytes).
+    unsafe { std::str::from_utf8_unchecked(&out[s..]) }
 }
+
 
 /// Return a `&str` borrowing the last `n` chars of (prev + out), without
 /// any allocation. Handles the cases:
@@ -749,6 +755,10 @@ fn tail_n_chars(s: &str, n: usize) -> &str {
     if s.is_empty() || n == 0 {
         return "";
     }
+    let char_count = s.chars().count();
+    if char_count <= n {
+        return s;
+    }
     let mut count = 0;
     let mut start = s.len();
     for (i, _) in s.char_indices().rev() {
@@ -780,31 +790,6 @@ fn find_non_ascii(bytes: &[u8]) -> usize {
     bytes.len()
 }
 
-/// SAFETY: caller must guarantee `value.is_ascii()`. Under that
-/// precondition, each byte of `value` is < 0x80 and can be safely
-/// copied as raw bytes into the output buffer (which holds valid
-/// UTF-8). This skips `String::push_str`'s UTF-8 validation pass.
-#[inline]
-fn unsafe_push_str_ascii(out: &mut String, value: &str) {
-    debug_assert!(value.is_ascii());
-    // SAFETY: see function-level doc.
-    // Append via the Vec representation of String. String's underlying
-    // Vec<u8> is exposed via `as_mut_vec`, which returns a `&mut Vec<u8>`
-    // (safe API).
-    let bytes = value.as_bytes();
-    let old_len = out.len();
-    let new_len = old_len + bytes.len();
-    if new_len > out.capacity() {
-        out.reserve(new_len - old_len);
-    }
-    // SAFETY: dst is within the Vec's allocated region; src and dst
-    // do not overlap (value is a different String).
-    unsafe {
-        let dst = out.as_mut_vec().as_mut_ptr().add(old_len);
-        std::ptr::copy_nonoverlapping(bytes.as_ptr(), dst, bytes.len());
-        out.as_mut_vec().set_len(new_len);
-    }
-}
 
 #[cfg(test)]
 mod tests {
