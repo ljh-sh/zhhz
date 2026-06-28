@@ -168,7 +168,7 @@ jobs:
 
   publish-crates:
     name: Publish to crates.io
-    needs: release
+    needs: [release, changelog-check]
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
     permissions:
@@ -185,3 +185,49 @@ jobs:
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
         run: cargo publish --locked
+
+  changelog-check:
+    name: Changelog files exist for tag
+    needs: build
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+        with:
+          fetch-depth: 0
+
+      - name: Determine tag
+        id: tag_check
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_TAG: ${{ inputs.tag }}
+          REF: ${{ github.ref }}
+        run: |
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            echo "name=$INPUT_TAG" >> "$GITHUB_OUTPUT"
+          else
+            echo "name=${REF#refs/tags/}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Verify changelog files exist
+        env:
+          TAG: ${{ steps.tag_check.outputs.name }}
+        run: |
+          set -e
+          VER="${TAG#v}"
+          EN_FILE="changelog/v${VER}.md"
+          CN_FILE="changelog/v${VER}.cn.md"
+          if [ ! -f "$EN_FILE" ]; then
+            echo "::error file=$EN_FILE::Missing changelog file $EN_FILE"
+            echo "Release blocked: every tag must have a $EN_FILE in place."
+            exit 1
+          fi
+          if [ ! -f "$CN_FILE" ]; then
+            echo "::error file=$CN_FILE::Missing Chinese changelog file $CN_FILE"
+            echo "Release blocked: every tag must have a $CN_FILE (see macli convention)."
+            exit 1
+          fi
+          echo "OK: $EN_FILE and $CN_FILE both exist"
