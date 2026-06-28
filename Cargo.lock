@@ -215,10 +215,11 @@ dependencies = [
 
 [[package]]
 name = "zhhz"
-version = "0.4.0"
+version = "0.7.7"
 dependencies = [
  "anyhow",
  "js-sys",
+ "memchr",
  "serde_json",
  "wasm-bindgen",
 ]

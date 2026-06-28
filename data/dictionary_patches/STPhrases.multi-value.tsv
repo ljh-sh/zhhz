@@ -1,0 +1,10 @@
+# zhhz multi-value patches for STPhrases
+# Each line: key<TAB>value1 value2 [...]
+# Overrides the corresponding entry in data/dictionary/STPhrases.txt
+# (the base dict remains untouched; this is a patch overlay).
+# Lines starting with # are comments.
+#
+# 一出戏: 量词 (一齣戲 = a show) vs 动词 (一出戲 = break character, 影视术语)
+# 出了:   动词 (出了 = departed/finished) vs 量词 (齣了 = a play [was performed]) — rare but valid
+# 出去:   动词 (出去 = go out) vs 量词 (齣去 = a play [went], rare)
+一出戏	一齣戲 一出戲

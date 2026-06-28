@@ -26,13 +26,15 @@ pub mod data;
 pub mod detect;
 pub mod dict;
 pub mod engine;
+pub mod ngram;
 
 #[cfg(feature = "wasm")]
 pub mod wasm;
 
 pub use detect::{detect_bytes, detect_text, Detection};
 pub use dict::Dict;
-pub use engine::{Config, Converter, Region};
+pub use engine::{Config, Converter, NgramMode, Region};
+pub use ngram::NgramModel;
 
 /// The default conversion config used when `--config` is omitted.
 pub const DEFAULT_CONFIG: &str = "s2t";

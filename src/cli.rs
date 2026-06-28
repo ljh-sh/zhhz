@@ -13,7 +13,8 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 
-use crate::engine::{region_pair_config, Config, Converter, Region};
+use crate::engine::{region_pair_config, Config, Converter, NgramMode, Region};
+use crate::ngram::NgramModel;
 use crate::{detect, DEFAULT_CONFIG};
 
 const HELP: &str = "\
@@ -38,6 +39,20 @@ OPTIONS:
                              runs a 2-stage pipeline (jp2t then t2s).
         --dict <FILE>       Custom dictionary (TSV: key<TAB>value), highest
                              priority. May be repeated. '#' lines are ignored.
+        --ngram <FILE>      Path to an ARPA n-gram model for multi-value
+                             character disambiguation. Required when
+                             --bigram or --trigram is used; ignored
+                             otherwise. Model files are not shipped in
+                             this crate — see ljh-sh/ngram-exp.
+        --fast              Disable n-gram disambig (dict-only). This is
+                             the original zhhz behaviour. Mutually
+                             exclusive with --bigram / --trigram.
+        --bigram            Use a 2-gram model for multi-value disambig.
+                             Implies --ngram. Mutually exclusive with
+                             --fast / --trigram.
+        --trigram           (Default when --ngram is given without
+                             --bigram / --fast.) Use a 3-gram model for
+                             multi-value disambig. Implies --ngram.
         --files-from <PATH|->  Read a newline-separated list of paths from
                              a file or stdin ('-'). Directories are walked
                              recursively.
@@ -53,6 +68,8 @@ EXAMPLES:
     echo '万与两' | zhhz --auto                   # detect -> Simplified
     zhhz -c s2t --dict mywords.txt input.txt      # legacy --config form
     cat urls.txt | zhhz --files-from -            # chardet-style batch
+    zhhz --trigram --ngram 3gram.arpa input.txt  # 齣/出 disambig
+    zhhz --fast input.txt                         # byte-level same as v0.6
 ";
 
 pub struct Cli {
@@ -66,6 +83,18 @@ pub struct Cli {
     pub auto: bool,
     pub files_from: Option<PathBuf>,
     pub null: bool,
+    pub ngram: Option<PathBuf>,
+    pub mode_flag: ModeFlag,
+}
+
+/// User-facing mode selection. `Default` means: no flag given; if a
+/// `--ngram` file is also given, the default is Trigram; otherwise Off.
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub enum ModeFlag {
+    Default,
+    Fast,
+    Bigram,
+    Trigram,
 }
 
 enum Action {
@@ -86,6 +115,8 @@ fn parse_args(argv: Vec<String>) -> Result<Action> {
         auto: false,
         files_from: None,
         null: false,
+        ngram: None,
+        mode_flag: ModeFlag::Default,
     };
     let mut args = argv.into_iter().skip(1).peekable();
     while let Some(arg) = args.next() {
@@ -96,6 +127,12 @@ fn parse_args(argv: Vec<String>) -> Result<Action> {
             "-i" | "--in-place" => cli.in_place = true,
             "--auto" => cli.auto = true,
             "-0" | "--null" => cli.null = true,
+            "--fast" => cli.mode_flag = ModeFlag::Fast,
+            "--bigram" => cli.mode_flag = ModeFlag::Bigram,
+            "--trigram" => cli.mode_flag = ModeFlag::Trigram,
+            "--ngram" => {
+                cli.ngram = Some(PathBuf::from(take_value(&mut args, "--ngram")?));
+            }
             "--files-from" => {
                 cli.files_from = Some(PathBuf::from(take_value(&mut args, "--files-from")?));
             }
@@ -122,6 +159,9 @@ fn parse_args(argv: Vec<String>) -> Result<Action> {
                     "--from" => cli.from = Some(take_owned_value(flag, val)?),
                     "--to" => cli.to = Some(take_owned_value(flag, val)?),
                     "--dict" => cli.dicts.push(PathBuf::from(take_owned_value(flag, val)?)),
+                    "--ngram" => {
+                        cli.ngram = Some(PathBuf::from(take_owned_value(flag, val)?));
+                    }
                     "--auto" | "--in-place" | "--list" => {
                         if val.is_some() {
                             return Err(anyhow::anyhow!("option {flag} does not take a value"));
@@ -145,6 +185,25 @@ fn parse_args(argv: Vec<String>) -> Result<Action> {
         return Err(anyhow::anyhow!(
             "--config is mutually exclusive with --from/--to"
         ));
+    }
+    // Mode flag mutual exclusion
+    let explicit = [
+        ModeFlag::Fast,
+        ModeFlag::Bigram,
+        ModeFlag::Trigram,
+    ]
+    .iter()
+    .filter(|m| cli.mode_flag == **m)
+    .count();
+    if explicit > 1 {
+        return Err(anyhow::anyhow!(
+            "--fast, --bigram and --trigram are mutually exclusive"
+        ));
+    }
+    // If a ngram file is given without an explicit mode flag, default
+    // to --trigram.
+    if cli.mode_flag == ModeFlag::Default && cli.ngram.is_some() {
+        cli.mode_flag = ModeFlag::Trigram;
     }
     Ok(Action::Run(cli))
 }
@@ -299,6 +358,42 @@ fn resolve_config(cli: &Cli) -> Result<Config> {
     Config::parse(cfg_name).map_err(|e| anyhow::anyhow!("invalid --config: {e}"))
 }
 
+/// Load the ARPA n-gram model and translate the user's `ModeFlag` to the
+/// engine `NgramMode`. Returns `Ok(None)` for the fast path.
+fn load_ngram(cli: &Cli) -> Result<Option<(NgramModel, NgramMode)>> {
+    match cli.mode_flag {
+        ModeFlag::Default | ModeFlag::Fast => {
+            if cli.ngram.is_some() {
+                // Spec: --ngram is silently ignored in fast mode. (Not
+                // an error; we just don't load the model.)
+            }
+            Ok(None)
+        }
+        ModeFlag::Bigram | ModeFlag::Trigram => {
+            let path = cli.ngram.as_ref().ok_or_else(|| {
+                anyhow::anyhow!(
+                    "--{} requires --ngram <arpa-file>",
+                    match cli.mode_flag {
+                        ModeFlag::Bigram => "bigram",
+                        ModeFlag::Trigram => "trigram",
+                        _ => unreachable!(),
+                    }
+                )
+            })?;
+            let model = NgramModel::from_file(path.to_str().ok_or_else(|| {
+                anyhow::anyhow!("n-gram path is not valid UTF-8: {}", path.display())
+            })?)
+            .with_context(|| format!("failed to load n-gram model {}", path.display()))?;
+            let mode = match cli.mode_flag {
+                ModeFlag::Bigram => NgramMode::Bigram,
+                ModeFlag::Trigram => NgramMode::Trigram,
+                _ => unreachable!(),
+            };
+            Ok(Some((model, mode)))
+        }
+    }
+}
+
 fn run_cli(cli: Cli) -> Result<()> {
     if cli.list {
         list_regions_and_configs();
@@ -306,6 +401,7 @@ fn run_cli(cli: Cli) -> Result<()> {
     }
 
     let custom = load_custom_dicts(&cli.dicts)?;
+    let ngram = load_ngram(&cli)?;
 
     // Gather inputs: positional files, plus any from --files-from, with dirs
     // walked recursively (chardet pattern). `None` in the returned Vec means
@@ -317,10 +413,16 @@ fn run_cli(cli: Cli) -> Result<()> {
         // --auto: detect each input's script variant and convert it to
         // Simplified (cn-s). Each region's direct-to-cn-s config is used;
         // for jp-n (shinjitai) a 2-stage pipeline jp2t → t2s is required.
-        let t2s = Converter::with_custom(Config::T2s, &custom);
-        let tw2sp = Converter::with_custom(Config::Tw2sp, &custom);
-        let hk2sp = Converter::with_custom(Config::Hk2sp, &custom);
-        let jp2t = Converter::with_custom(Config::Jp2t, &custom);
+        let mut t2s = Converter::with_custom(Config::T2s, &custom);
+        let mut tw2sp = Converter::with_custom(Config::Tw2sp, &custom);
+        let mut hk2sp = Converter::with_custom(Config::Hk2sp, &custom);
+        let mut jp2t = Converter::with_custom(Config::Jp2t, &custom);
+        if let Some((model, mode)) = &ngram {
+            t2s = t2s.with_ngram(clone_ngram(model), *mode);
+            tw2sp = tw2sp.with_ngram(clone_ngram(model), *mode);
+            hk2sp = hk2sp.with_ngram(clone_ngram(model), *mode);
+            jp2t = jp2t.with_ngram(clone_ngram(model), *mode);
+        }
         for (path, mut content) in inputs {
             if path == std::path::Path::new("-") && content.is_empty() {
                 std::io::stdin()
@@ -344,7 +446,10 @@ fn run_cli(cli: Cli) -> Result<()> {
     }
 
     let config = resolve_config(&cli)?;
-    let converter = Converter::with_custom(config, &custom);
+    let mut converter = Converter::with_custom(config, &custom);
+    if let Some((model, mode)) = ngram {
+        converter = converter.with_ngram(model, mode);
+    }
 
     for (path, mut content) in inputs {
         if path == std::path::Path::new("-") && content.is_empty() {
@@ -357,6 +462,12 @@ fn run_cli(cli: Cli) -> Result<()> {
         write_one(&path, &output, &cli)?;
     }
     Ok(())
+}
+
+/// Cheap-ish clone of the model for the 4 --auto converters: deep-clone
+/// the HashMaps. ARPA models are typically a few MB; this is fine.
+fn clone_ngram(m: &NgramModel) -> NgramModel {
+    m.clone_model()
 }
 
 fn write_all_stdout(text: &str) -> Result<()> {
