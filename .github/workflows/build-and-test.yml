@@ -1,0 +1,205 @@
+# build-and-test.yml
+#
+# Native build + test + bench on 3 platforms (macOS arm64, Linux amd64,
+# Linux arm64). Output is a **test report** written to:
+#
+#     changelog/v<X>.test.md       (en, English)
+#     changelog/v<X>.test.cn.md    (cn, Chinese)
+#
+# Naming follows the existing changelog convention (v{X}.md / v{X}.cn.md)
+# with `.test` suffix to mark the file as a test report, not a release
+# note. The version <X> is the *next* semver bump from the latest
+# non-prerelease release (e.g. if v0.7.7 is latest, the report is for
+# v0.7.8).
+#
+# This workflow does NOT publish a release. After this workflow
+# produces a green report, the user reviews changelog/v<X>.test.md
+# then triggers `build-and-release.yml` (workflow_dispatch) which
+# creates the GitHub Release.
+#
+# Triggers:
+#   - workflow_dispatch (manual)
+#   - pull_request (auto, on PRs to main)
+name: build-and-test
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 'git ref to test (default: HEAD)'
+        required: false
+        default: ''
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+  SOURCE_DATE_EPOCH: 1700000000
+  TZ: UTC
+  LC_ALL: C
+
+jobs:
+  discover:
+    name: Discover next version + ref
+    runs-on: ubuntu-latest
+    outputs:
+      ref: ${{ steps.r.outputs.ref }}
+      sha: ${{ steps.r.outputs.sha }}
+      next_version: ${{ steps.v.outputs.next }}
+    steps:
+      - name: Determine ref + sha
+        id: r
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          SHA: ${{ github.sha }}
+          REF: ${{ github.ref }}
+          INPUT_REF: ${{ inputs.ref }}
+        run: |
+          if [ "$EVENT_NAME" = "workflow_dispatch" ] && [ -n "$INPUT_REF" ]; then
+            echo "ref=$INPUT_REF" >> "$GITHUB_OUTPUT"
+            echo "sha=$(git ls-remote $GITHUB_SERVER_URL/$GITHUB_REPOSITORY $INPUT_REF | awk '{print $1}')" >> "$GITHUB_OUTPUT"
+          else
+            echo "ref=$REF" >> "$GITHUB_OUTPUT"
+            echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Determine next version (from latest non-prerelease)
+        id: v
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          last=$(gh release list --limit 50 --json tagName,isPrerelease \
+                   --jq '.[] | select(.isPrerelease==false) | .tagName' | head -1)
+          if [ -z "$last" ]; then
+            next="v0.0.1"
+          else
+            # Strip leading 'v', bump patch, re-add 'v'
+            base="${last#v}"
+            next="v$(echo "$base" | awk -F. '{print $1"."$2"."$3+1}')"
+          fi
+          echo "next=$next" >> "$GITHUB_OUTPUT"
+          echo "Last release: ${last:-none}, next test-report version: $next"
+
+  native-test:
+    name: Native test (${{ matrix.label }})
+    needs: discover
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: macos-arm64
+            os: macos-latest
+            target: aarch64-apple-darwin
+          - label: linux-amd64
+            os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+          - label: linux-arm64
+            os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@692973e3d937129bc3e3e8fccccf9de85a18f5d9 # v4.2.2
+        with:
+          ref: ${{ needs.discover.outputs.ref }}
+          fetch-depth: 0
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@4f7d7d44e8c8a8b3a1b8c8e7d7c7b7a7b7a7b7a7 # placeholder
+        with:
+          target: ${{ matrix.target }}
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@62ce7e45f094b2d3b25da19e23a2f465bf213f78 # v2.7.5
+        with:
+          cache-on-failure: true
+
+      - name: Run tests
+        run: |
+          cargo test --release --locked --target ${{ matrix.target }} \
+            --no-fail-fast 2>&1 | tee test-output.txt
+          echo "EXIT=${PIPESTATUS[0]}" > test-exit.txt
+
+      - name: Build test artefacts
+        run: |
+          cargo build --release --locked --target ${{ matrix.target }} \
+            --example perf_only --example diff_corpus
+          mkdir -p out/bin
+          cp target/${{ matrix.target }}/release/examples/perf_only out/bin/ 2>/dev/null || true
+          cp target/${{ matrix.target }}/release/examples/diff_corpus out/bin/ 2>/dev/null || true
+
+      - name: Upload
+        uses: actions/upload-artifact@3a1f6f5c9b8b3a3a3a3a3a3a3a3a3a3a3a3a3a3 # placeholder
+        with:
+          name: test-${{ matrix.label }}
+          path: |
+            out/bin/
+            test-output.txt
+            test-exit.txt
+
+  report:
+    name: Write changelog test report
+    needs: [discover, native-test]
+    if: always()
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@692973e3d937129bc3e3e8fccccf9de85a18f5d9 # v4.2.2
+        with:
+          ref: ${{ needs.discover.outputs.ref }}
+          fetch-depth: 0
+
+      - name: Download all test artefacts
+        uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16 # v4.1.8
+        with:
+          path: artefacts
+          pattern: test-*
+          merge-multiple: true
+
+      - name: Build test-report markdown
+        id: build
+        env:
+          REF: ${{ needs.discover.outputs.ref }}
+          SHA: ${{ needs.discover.outputs.sha }}
+          NEXT: ${{ needs.discover.outputs.next_version }}
+        run: |
+          python3 .github/workflows/scripts/summarise-tests.py \
+            --artefacts artefacts \
+            --ref "$REF" \
+            --sha "$SHA" \
+            --next "$NEXT" \
+            --output-en "changelog/${NEXT}.test.md" \
+            --output-cn "changelog/${NEXT}.test.cn.md"
+          echo "::notice::Wrote changelog/${NEXT}.test.md and .test.cn.md"
+
+      - name: Commit test report
+        env:
+          NEXT: ${{ needs.discover.outputs.next_version }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add "changelog/${NEXT}.test.md" "changelog/${NEXT}.test.cn.md"
+          # Only commit if there are changes (idempotent re-runs)
+          if git diff --cached --quiet; then
+            echo "No changes to commit (report unchanged from previous run)."
+          else
+            git commit -m "test: ${NEXT} build-and-test report"
+            git push origin HEAD
+          fi
+
+      - name: PR comment (if PR)
+        if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NEXT: ${{ needs.discover.outputs.next_version }}
+        run: |
+          gh pr comment "${{ github.event.pull_request.number }}" --body "$(cat changelog/${NEXT}.test.md | head -c 2000)"
