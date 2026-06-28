@@ -33,7 +33,14 @@ def parse_platform(artefact_dir: Path):
     """Read test-output.txt + test-exit.txt, return (status_str, perf_built, diff_built)."""
     test_out = artefact_dir / "test-output.txt"
     test_exit = artefact_dir / "test-exit.txt"
-    bin_dir = artefact_dir / "bin"
+    # The native-test workflow uploads out/bin/{perf_only,diff_corpus}.
+    # After download-artifact extracts, layout is
+    #   artefacts/test-<plat>/out/bin/<binary>
+    # so we look in out/bin/ (not directly in bin/).
+    bin_dir = artefact_dir / "out" / "bin"
+    if not bin_dir.exists():
+        # Fallback: some older workflows put them directly in bin/
+        bin_dir = artefact_dir / "bin"
     perf = (bin_dir / "perf_only").exists()
     diff = (bin_dir / "diff_corpus").exists()
     if not test_out.exists():
