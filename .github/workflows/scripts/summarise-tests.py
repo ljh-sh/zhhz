@@ -46,25 +46,22 @@ def parse_platform(artefact_dir: Path):
               file=sys.stderr)
         return ("❌ no artefact", "—", "—")
     content = test_out.read_text(errors="replace")
-    # Find the last "test result: ok" or "FAILED" line
-    m = re.search(
-        r"test result: (ok|FAILED).*?(\d+ passed.*?; \d+ failed.*?; \d+ ignored.*?; \d+ measured.*?; \d+ filtered out)",
+    # Find ALL test result lines. cargo runs multiple test binaries
+    # (lib, bin, examples) and prints one result line per binary.
+    # The worst result wins: FAILED > ok-with-failures > ok-clean.
+    results = re.findall(
+        r"test result: (ok|FAILED)\.\s*(\d+) passed;\s*(\d+) failed",
         content,
     )
-    if m and m.group(1) == "ok":
-        passed = re.search(r"(\d+) passed", m.group(2))
-        failed = re.search(r"(\d+) failed", m.group(2))
-        n_pass = passed.group(1) if passed else "?"
-        n_fail = failed.group(1) if failed else "0"
-        status = f"✅ {n_pass} passed"
-        if n_fail != "0":
-            status = f"❌ {n_fail} failed"
+    if not results:
+        return ("⚠️ no result line", "✅" if perf else "—", "✅" if diff else "—")
+    total_pass = sum(int(p) for _, p, _ in results)
+    total_fail = sum(int(f) for _, _, f in results)
+    any_failed = any(r == "FAILED" for r, _, _ in results)
+    if any_failed or total_fail > 0:
+        status = f"❌ {total_fail} failed ({total_pass} passed across {len(results)} binaries)"
     else:
-        # Try to find any FAILED line
-        if "test result: FAILED" in content:
-            status = "❌ FAILED"
-        else:
-            status = "⚠️ no result line"
+        status = f"✅ {total_pass} passed ({len(results)} binaries)"
     return (status, "✅" if perf else "—", "✅" if diff else "—")
 
 

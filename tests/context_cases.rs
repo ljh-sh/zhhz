@@ -96,6 +96,7 @@ fn case_一出_verb_depart() {
 // --- N-gram path: cases that the n-gram is expected to fix. ---
 
 #[test]
+#[ignore = "requires /tmp/ngram-out/2gram.arpa (download from ljh-sh/ngram-exp)"]
 fn ngram_这出戏() {
     // 这出戏 = "this show" (齿), NOT "this depart play" (出)
     // "这" alone is in STCharacters; "出戏" is in STPhrases with
@@ -106,6 +107,7 @@ fn ngram_这出戏() {
 }
 
 #[test]
+#[ignore = "requires /tmp/ngram-out/2gram.arpa (download from ljh-sh/ngram-exp)"]
 fn ngram_这出剧() {
     // 这出剧 = "this show/play" → 齣
     let got = s2t_bigram("这出剧");
@@ -113,6 +115,7 @@ fn ngram_这出剧() {
 }
 
 #[test]
+#[ignore = "requires /tmp/ngram-out/2gram.arpa (download from ljh-sh/ngram-exp)"]
 fn ngram_这出电影() {
     // 这出电影 = "this movie" → 齣
     let got = s2t_bigram("这出电影");
