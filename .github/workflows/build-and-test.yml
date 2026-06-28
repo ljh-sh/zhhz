@@ -105,18 +105,18 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout
-        uses: actions/checkout@692973e3d937129bc3e3e8fccccf9de85a18f5d9 # v4.2.2
+        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
         with:
           ref: ${{ needs.discover.outputs.ref }}
           fetch-depth: 0
 
       - name: Setup Rust
-        uses: dtolnay/rust-toolchain@4f7d7d44e8c8a8b3a1b8c8e7d7c7b7a7b7a7b7a7 # placeholder
+        uses: actions-rust-lang/setup-rust-toolchain@4d1965c9142484e48d40c19de54b5cba84953a06 # v1.10.0
         with:
           target: ${{ matrix.target }}
 
       - name: Cache cargo
-        uses: Swatinem/rust-cache@62ce7e45f094b2d3b25da19e23a2f465bf213f78 # v2.7.5
+        uses: Swatinem/rust-cache@v2.7.7
         with:
           cache-on-failure: true
 
@@ -135,7 +135,7 @@ jobs:
           cp target/${{ matrix.target }}/release/examples/diff_corpus out/bin/ 2>/dev/null || true
 
       - name: Upload
-        uses: actions/upload-artifact@3a1f6f5c9b8b3a3a3a3a3a3a3a3a3a3a3a3a3a3 # placeholder
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: test-${{ matrix.label }}
           path: |
@@ -153,7 +153,7 @@ jobs:
       pull-requests: write
     steps:
       - name: Checkout
-        uses: actions/checkout@692973e3d937129bc3e3e8fccccf9de85a18f5d9 # v4.2.2
+        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
         with:
           ref: ${{ needs.discover.outputs.ref }}
           fetch-depth: 0
