@@ -109,13 +109,20 @@ do_build() {
 
     local src="target/$target/release/${bin_name}${ext}"
     local dst="$OUT_DIR/$out_subdir/${bin_name}${ext}"
+    local dst_dir="$(dirname "$dst")"
+
+    # Always wipe the destination bin/ first. The build-and-test workflow
+    # also produces `target/.../release/examples/{perf_only,diff_corpus}`
+    # as test artefacts; if a previous step or manual run copied them
+    # here, we don't want them in the release tarball.
+    rm -rf "$dst_dir"
+    mkdir -p "$dst_dir"
 
     if [ ! -f "$src" ]; then
         echo "  Warning: $src not found, skipping"
         return 0
     fi
 
-    mkdir -p "$(dirname "$dst")"
     cp "$src" "$dst"
     echo "  -> $dst"
 }
