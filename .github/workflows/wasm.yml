@@ -47,16 +47,33 @@ jobs:
           node --version
           node -e '
             const pkg = require("./pkg");
-            const { convert, detect } = pkg;
+            const { convert, convert_with_custom, detect } = pkg;
+
+            function assert(label, actual, expected) {
+              if (actual !== expected) {
+                console.error("FAIL:", label, "expected", JSON.stringify(expected), "got", JSON.stringify(actual));
+                process.exit(1);
+              }
+              console.log("ok:", label, "->", JSON.stringify(actual));
+            }
+
             // 1. cn-s -> cn-t
-            console.log("s2t:", convert("汉字计算机软件", "s2t"));
-            // 2. cn-tw -> cn-s
-            console.log("tw2sp:", convert("他感染了A型肝炎", "tw2sp"));
+            assert("s2t", convert("汉字计算机软件", "s2t"), "漢字計算機軟體");
+            // 2. cn-tw -> cn-s (phrase-laden input unchanged)
+            assert("tw2sp", convert("他感染了A型肝炎", "tw2sp"), "他感染了A型肝炎");
             // 3. detect
             const d = detect("他去了西維珍尼亞州");
-            console.log("detect:", d);
-            if (d.region !== "cn-hk") process.exit(1);
-            if (d.confidence < 30) process.exit(1);
+            assert("detect.region", d && d.region, "cn-hk");
+            if (!d || d.confidence < 30) {
+              console.error("FAIL: detect.confidence", d && d.confidence, "expected >= 30");
+              process.exit(1);
+            }
+            // 4. convert_with_custom — same shape as CLI --dict (zhhz#40).
+            assert(
+              "convert_with_custom",
+              convert_with_custom("买软件", "s2t", [["软件", "軟體"]]),
+              "買軟體"
+            );
           '
 
       - name: Build (web target for browsers)
