@@ -1,4 +1,8 @@
 /target/
+# Local wasm-pack build output (zhhz#40). pkg/ is the smoke-test
+# nodejs-target build, pkg-npm/ is the bundler-target publish artifact.
+pkg/
+pkg-npm/
 *.swp
 *.swo
 *~
