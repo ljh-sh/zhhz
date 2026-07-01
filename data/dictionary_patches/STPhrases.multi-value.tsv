@@ -8,3 +8,17 @@
 # 出了:   动词 (出了 = departed/finished) vs 量词 (齣了 = a play [was performed]) — rare but valid
 # 出去:   动词 (出去 = go out) vs 量词 (齣去 = a play [went], rare)
 一出戏	一齣戲 一出戲
+
+# Found by zhhz#80 audit (2026-06-28): OpenCC STPhrases default cands[0] selection
+# is wrong for these specific contexts. Both OpenCC s2t and zhhz fast default to
+# cands[0] which doesn't fit. Tracking here; no override lines added yet —
+# patches TBD after upstream OpenCC discussion (see mneme story/260629.zhhz-stphrases-zhanke).
+#
+# 占课: 占卜 (cands[0]=占課) vs 占用 (cands[1]=佔課)
+#   Contexts like 占卜/占卦/解惑 should select 占課, not 佔課.
+# 庄里镇: 地名 (cands[0]=莊里鎮) vs "庄里面" (cands[1]=莊裏鎮)
+#   As a place name (especially 河北莊里鎮), should be 莊里鎮.
+# 创制: 创立制度 (cands[0]=創制) vs 制造 (cands[1]=創製)
+#   创立法律 should select 創制, not 創製.
+# 编制: 编排制作 (cands[0]=編制) vs 制造 (cands[1]=編製)
+#   編制表 (composition table) should select 編制, not 編製.
