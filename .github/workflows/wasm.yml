@@ -48,11 +48,13 @@ jobs:
         run: wasm-pack build --target nodejs --features wasm
 
       - name: Smoke test in Node
+        # The bundler target produces ESM glue (`"type": "module"`); load via
+        # dynamic import so a single script runs against any wasm-pack target.
         run: |
           node --version
-          node -e '
-            const pkg = require("./pkg");
-            const { convert, convert_with_custom, detect } = pkg;
+          node --input-type=module -e '
+            const mod = await import("./pkg/zhhz.js");
+            const { convert, convert_with_custom, detect, listConfigs, listLocales, configForRegionPair, Converter } = mod;
 
             function assert(label, actual, expected) {
               if (actual !== expected) {
@@ -62,23 +64,60 @@ jobs:
               console.log("ok:", label, "->", JSON.stringify(actual));
             }
 
-            // 1. cn-s -> cn-t
-            assert("s2t", convert("汉字计算机软件", "s2t"), "漢字計算機軟體");
-            // 2. cn-tw -> cn-s (phrase-laden input unchanged)
-            assert("tw2sp", convert("他感染了A型肝炎", "tw2sp"), "他感染了A型肝炎");
-            // 3. detect
+            // 1. cn-s -> cn-t (OpenCC standard)
+            assert("s2t", convert("汉字计算机软件", "s2t"), "漢字計算機軟件");
+            // 2. cn-tw (with phrases) -> cn-s (A -> 甲 is Taiwan-style)
+            assert("tw2sp", convert("他感染了A型肝炎", "tw2sp"), "他感染了甲型肝炎");
+            // 3. detect — zhhz-only capability vs opencc-js
             const d = detect("他去了西維珍尼亞州");
             assert("detect.region", d && d.region, "cn-hk");
             if (!d || d.confidence < 30) {
               console.error("FAIL: detect.confidence", d && d.confidence, "expected >= 30");
               process.exit(1);
             }
-            // 4. convert_with_custom — same shape as CLI --dict (zhhz#40).
+            // 4. convert_with_custom — array form (zhhz#40).
             assert(
-              "convert_with_custom",
+              "convert_with_custom array",
               convert_with_custom("买软件", "s2t", [["软件", "軟體"]]),
               "買軟體"
             );
+            // 5. convert_with_custom — string form (opencc-js DictLike compat).
+            assert(
+              "convert_with_custom string",
+              convert_with_custom("香蕉", "s2t", "香蕉 banana|蘋果 apple"),
+              "banana"
+            );
+            // 6. Introspection (better than opencc-js: flat lists).
+            assert("listConfigs length", listConfigs().length, 16);
+            assert("listConfigs contains s2twp", listConfigs().includes("s2twp"), true);
+            assert("listLocales length", listLocales().length, 6);
+            assert("listLocales contains cn-tw", listLocales().includes("cn-tw"), true);
+            // 7. Semantic region -> config (zhhz-only vs opencc-js).
+            assert("configForRegionPair cn-s->cn-tw", configForRegionPair("cn-s", "cn-tw"), "s2twp");
+            assert("configForRegionPair cn-s->cn-hk", configForRegionPair("cn-s", "cn-hk"), "s2hkp");
+            // 8. Converter class (factory instance; strictly better than
+            //    opencc-js's closure factory: also exposes .config + per-call
+            //    .convertWithCustom + .withCustom).
+            const c = new Converter("s2twp");
+            assert("Converter c.config", c.config, "s2twp");
+            assert("Converter c.convert", c.convert("信息"), "資訊");
+            assert(
+              "Converter c.convertWithCustom",
+              c.convertWithCustom("买软件", [["软件", "軟體"]]),
+              "買軟體"
+            );
+            const c2 = Converter.forRegion("cn-s", "cn-tw");
+            assert("Converter.forRegion config", c2.config, "s2twp");
+            assert("Converter.forRegion convert", c2.convert("鼠标"), "滑鼠");
+            const c3 = c.withCustom([["软件", "軟體"]]);
+            assert("Converter.withCustom convert", c3.convert("买软件"), "買軟體");
+            // 9. Error paths surface a useful message.
+            let threw = false;
+            try { convert("hello", "bogus"); } catch (e) { threw = true; }
+            assert("bad config throws", threw, true);
+            threw = false;
+            try { convert_with_custom("hello", "s2t", ""); } catch (e) { threw = true; }
+            assert("empty custom dict throws", threw, true);
           '
 
       - name: Build (web target for browsers)
@@ -109,16 +148,17 @@ jobs:
         env:
           WASM_PACK_VERSION: v0.13.0
 
-      # Build into `pkg-npm/` (NOT `pkg/`) so this job doesn't overwrite the
-      # smoke-test nodejs-target build that the `wasm` job already produced.
-      # The bundler target writes ESM glue + .wasm + .d.ts + package.json.
+      # Build into `pkg/` for the npm publish. This job runs after the
+      # `wasm` smoke job (sequential), so overwriting the same `pkg/`
+      # output is intentional. The bundler target writes ESM glue +
+      # .wasm + .d.ts + package.json.
       - name: Build (bundler-friendly npm target)
-        run: wasm-pack build --target bundler --features wasm --out-dir pkg-npm
+        run: wasm-pack build --target bundler --features wasm
 
       - name: Publish to npm
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: npm publish pkg-npm --access public
+        run: npm publish pkg --access public
 
   publish-dryrun:
     # Exercise the publish path without burning an npm version.
@@ -147,13 +187,13 @@ jobs:
         env:
           WASM_PACK_VERSION: v0.13.0
 
-      - name: Build (bundler target into pkg-npm/)
-        run: wasm-pack build --target bundler --features wasm --out-dir pkg-npm
+      - name: Build (bundler target into pkg/)
+        run: wasm-pack build --target bundler --features wasm
 
       - name: Verify tarball composition
         run: |
           set -euo pipefail
-          cd pkg-npm
+          cd pkg
           echo "--- package.json metadata ---"
           node -e '
             const p = require("./package.json");
@@ -176,11 +216,17 @@ jobs:
           echo "--- npm pack --dry-run ---"
           npm pack --dry-run
           echo "--- load smoke from the package ---"
-          node -e '
-            const { convert, convert_with_custom, detect } = require("./zhhz.js");
+          node --input-type=module -e '
+            const { convert, convert_with_custom, detect, listConfigs, listLocales, configForRegionPair, Converter } = await import("./zhhz.js");
             if (convert("汉字","s2t") !== "漢字") { console.error("smoke fail"); process.exit(1); }
             if (convert_with_custom("买软件","s2t",[["软件","軟體"]]) !== "買軟體") { console.error("custom fail"); process.exit(1); }
+            if (convert_with_custom("香蕉","s2t","香蕉 banana|蘋果 apple") !== "banana") { console.error("custom-string fail"); process.exit(1); }
             const d = detect("他去了西維珍尼亞州");
             if (!d || d.region !== "cn-hk") { console.error("detect fail"); process.exit(1); }
+            if (listConfigs().length !== 16) { console.error("listConfigs fail"); process.exit(1); }
+            if (listLocales().length !== 6) { console.error("listLocales fail"); process.exit(1); }
+            if (configForRegionPair("cn-s","cn-tw") !== "s2twp") { console.error("configForRegionPair fail"); process.exit(1); }
+            const c = new Converter("s2twp");
+            if (c.convert("信息") !== "資訊") { console.error("Converter fail"); process.exit(1); }
             console.log("dry-run OK");
           '
