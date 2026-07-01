@@ -1,0 +1,16 @@
+{
+  "name": "zhhz-node-usage-example",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Runnable Node.js example for the zhhz npm package (zhhz#40).",
+  "type": "module",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "start": "node index.mjs"
+  },
+  "dependencies": {
+    "zhhz": "^0.7.8"
+  }
+}
