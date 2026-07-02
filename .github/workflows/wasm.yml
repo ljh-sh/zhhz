@@ -59,7 +59,14 @@ jobs:
           node tests/wasm-smoke.mjs
 
       - name: Build (web target for browsers)
-        run: wasm-pack build --target web --features wasm
+        run: |
+          wasm-pack build --target web --features wasm
+          # Also seed the Pages site's browser demo with the latest wasm.
+          # docs/demo/ is committed so Jekyll serves it directly; we
+          # refresh it here so the live demo never drifts from the
+          # published npm artifact.
+          mkdir -p docs/demo
+          cp pkg/zhhz.js pkg/zhhz_bg.js pkg/zhhz_bg.wasm docs/demo/
         # produces pkg/ again (overwrites) — kept as a final sanity check that
         # the web build also succeeds (different JS glue generation than nodejs).
 
