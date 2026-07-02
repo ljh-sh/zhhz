@@ -1,0 +1,45 @@
+[build-system]
+requires = ["maturin>=1.0,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "zhhz"
+version = "0.7.8"
+description = "Self-contained Simplified/Traditional Chinese converter — pure-Rust, data-embedded OpenCC reimplementation"
+readme = "README.md"
+license = { text = "Apache-2.0" }
+authors = [
+    { name = "ljh-sh", email = "lijunhao@x-cmd.com" },
+]
+keywords = ["chinese", "opencc", "simplified", "traditional", "conversion"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: Implementation :: CPython",
+    "Topic :: Text Processing :: Linguistic",
+]
+requires-python = ">=3.9"
+
+[project.urls]
+Homepage = "https://github.com/ljh-sh/zhhz"
+Documentation = "https://ljh-sh.github.io/zhhz/"
+Source = "https://github.com/ljh-sh/zhhz"
+Issues = "https://github.com/ljh-sh/zhhz/issues"
+
+[tool.maturin]
+# Build a Rust extension module that pip understands. The Rust crate
+# declares the `python` feature which pulls in pyo3; maturin enables
+# it implicitly here.
+features = ["python"]
+# Strip symbols from the wheel for size (matching the native CLI binary's
+# strip profile).
+strip = true
+# Include the Apache-2.0 LICENSE in the wheel metadata.
+license-files = ["LICENSE"]

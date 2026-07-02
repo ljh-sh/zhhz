@@ -8,3 +8,5 @@ pkg-npm/
 *~
 .DS_Store
 **/.release-artifacts/
+.venv/
+target/

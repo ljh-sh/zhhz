@@ -31,6 +31,9 @@ pub mod ngram;
 #[cfg(feature = "wasm")]
 pub mod wasm;
 
+#[cfg(feature = "python")]
+pub mod python;
+
 pub use detect::{detect_bytes, detect_text, Detection};
 pub use dict::Dict;
 pub use engine::{Config, Converter, NgramMode, Region};
