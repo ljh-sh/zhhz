@@ -96,7 +96,11 @@ jobs:
       - name: Publish to npm
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: npm publish pkg --access public
+        # `./pkg` (not `pkg`) — without the `./` prefix, npm treats the
+        # argument as a package-name spec and finds the unrelated
+        # `pkg@5.8.1` on the npm registry. (First publish attempt shipped
+        # an unrelated package before this fix; the dry-run caught it.)
+        run: npm publish ./pkg --access public
 
   publish-dryrun:
     # Exercise the publish path without burning an npm version.
