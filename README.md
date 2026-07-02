@@ -13,12 +13,13 @@ The name is a palindrome: **zh** hanzi, and **z**huan **h**uan **h**an **z**i (�
 
 ## Why
 
-OpenCC is the de-facto Chinese-conversion library, but its reference implementation is a C++ library with a CMake build, marisa-trie binaries loaded at runtime, and a [memory-safety bug history](https://github.com/BYVoid/OpenCC/issues/997). `zhhz` is a from-scratch Rust port that:
+OpenCC is the de-facto Chinese-conversion library. `zhhz` is a from-scratch
+Rust reimplementation built around the same dictionaries, designed to be:
 
-- **Is one self-contained binary.** Data is embedded via `include_str!`; nothing is fetched or installed alongside it.
-- **Is memory-safe by construction** — no C++, no `unsafe` in the conversion core.
-- **Supports custom conversion words** at the highest priority, for terminology, branding, or domain vocabulary.
-- **Tracks upstream data** via a pinned, reproducible sync script (`scripts/sync-opencc.sh`).
+- **One self-contained binary.** Data is embedded via `include_str!`; nothing is fetched or installed alongside it.
+- **Memory-safe by construction** — pure Rust in the conversion core.
+- **Friendly to custom conversion words** at the highest priority, for terminology, branding, or domain vocabulary.
+- **Tracked against upstream data** via a pinned, reproducible sync script (`scripts/sync-opencc.sh`).
 
 ## Designed for AI agents
 
