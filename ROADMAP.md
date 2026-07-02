@@ -15,6 +15,14 @@
   stdin / `--files-from` / `-0 --null` / recursive dir walk; output
   `<region>\t<confidence>\t<path>`. Library API: `detect_text`,
   `detect_bytes`. Published on crates.io.
+- **v0.7.8** — WebAssembly bindings shipped as `npm install zhhz`;
+  `convert` / `convert_with_custom` / `detect` / `listConfigs` /
+  `listLocales` / `configForRegionPair` / `Converter` (factory class)
+  exposed to Node.js with no native dependencies. API surface is
+  strictly richer than [`opencc-js`](https://github.com/nk2028/opencc-js)
+  (adds detection, introspection, semantic-region flags, per-instance
+  custom-word injection). OpenCC dictionaries embedded in the `.wasm`.
+  Closes [zhhz#40](https://github.com/ljh-sh/zhhz/issues/40).
 
 ## Next
 
@@ -41,10 +49,6 @@ parity contract.
   input/output example. Pure UI; no conversion change.
 - **`zhhz diff <a> <b>`.** Convert both files and print a char-level diff.
   Useful for hanzi parity review; no conversion change.
-- **WASM + npm package.** `wasm32-unknown-unknown` + `wasm-bindgen`; ship
-  an npm package so browser / Node consumers get OpenCC conversion with no
-  native deps and no runtime data fetch. The conversion core is already
-  IO-free.
 - **Python native extension.** PyO3 + `maturin`; wheels for CPython; the
   same `Converter` API exposed as a Python module.
 - **IDS handling verification.** Most likely already byte-identical to

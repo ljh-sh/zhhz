@@ -51,10 +51,7 @@ fn load_model() -> Option<NgramModel> {
     // not committed (see docs/ngram-policy.md) — it's expected to be
     // present only when running these tests locally after downloading
     // from ljh-sh/ngram-exp.
-    let candidates = [
-        "tests/fixtures/2gram.arpa",
-        "/tmp/ngram-out/2gram.arpa",
-    ];
+    let candidates = ["tests/fixtures/2gram.arpa", "/tmp/ngram-out/2gram.arpa"];
     for p in candidates {
         if Path::new(p).exists() {
             return NgramModel::from_file(p).ok();
@@ -69,20 +66,14 @@ fn load_model() -> Option<NgramModel> {
 fn case_一出机场_就看到_一出好戏() {
     // 一出机场 = depart the airport  → 出 (NOT 齣)
     // 一出好戏 = a good show         → 齣
-    assert_eq!(
-        s2t("一出机场就看到一出好戏"),
-        "一出機場就看到一齣好戲"
-    );
+    assert_eq!(s2t("一出机场就看到一出好戏"), "一出機場就看到一齣好戲");
 }
 
 #[test]
 fn case_一出戏院_就看到_一出好戏() {
     // 一出戏院 = depart the theater  → 出 (NOT 齣)
     // 一出好戏 = a good show         → 齣
-    assert_eq!(
-        s2t("一出戏院就看到一出好戏"),
-        "一出戲院就看到一齣好戲"
-    );
+    assert_eq!(s2t("一出戏院就看到一出好戏"), "一出戲院就看到一齣好戲");
 }
 
 #[test]
@@ -188,11 +179,11 @@ fn custom_dict_演员一出戏_verb() {
     // escape hatch until per-position disambig + better corpus land.
     use zhhz::Config::S2t;
     use zhhz::Converter;
-    let c = Converter::with_custom(
-        S2t,
-        &[("演员一出戏".to_string(), "演員一出戲".to_string())],
+    let c = Converter::with_custom(S2t, &[("演员一出戏".to_string(), "演員一出戲".to_string())]);
+    assert_eq!(
+        c.convert("演员一出戏，导演就喊卡"),
+        "演員一出戲，導演就喊卡"
     );
-    assert_eq!(c.convert("演员一出戏，导演就喊卡"), "演員一出戲，導演就喊卡");
 }
 
 // --- ConvertReport: detect multi-value positions for LLM post-process.

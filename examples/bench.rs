@@ -26,10 +26,8 @@ fn main() {
 
     // Pre-build one converter per mode.
     let fast = Converter::new(Config::S2t);
-    let bigram =
-        Converter::new(Config::S2t).with_ngram(model.clone_model(), NgramMode::Bigram);
-    let trigram =
-        Converter::new(Config::S2t).with_ngram(model.clone_model(), NgramMode::Trigram);
+    let bigram = Converter::new(Config::S2t).with_ngram(model.clone_model(), NgramMode::Bigram);
+    let trigram = Converter::new(Config::S2t).with_ngram(model.clone_model(), NgramMode::Trigram);
 
     let runs = 3;
     let mbps = |us: u128| text.len() as f64 / 1_048_576.0 / (us as f64 / 1_000_000.0);
@@ -39,16 +37,37 @@ fn main() {
     println!("{}", "-".repeat(42));
 
     // fast
-    let t = time_it(runs, || { fast.convert(&text); });
-    println!("{:<18}  {:>10.1}  {:>10.2}", "fast", ms(t), mbps(t / runs as u128));
+    let t = time_it(runs, || {
+        fast.convert(&text);
+    });
+    println!(
+        "{:<18}  {:>10.1}  {:>10.2}",
+        "fast",
+        ms(t),
+        mbps(t / runs as u128)
+    );
 
     // bigram
-    let t = time_it(runs, || { bigram.convert(&text); });
-    println!("{:<18}  {:>10.1}  {:>10.2}", "bigram", ms(t), mbps(t / runs as u128));
+    let t = time_it(runs, || {
+        bigram.convert(&text);
+    });
+    println!(
+        "{:<18}  {:>10.1}  {:>10.2}",
+        "bigram",
+        ms(t),
+        mbps(t / runs as u128)
+    );
 
     // trigram
-    let t = time_it(runs, || { trigram.convert(&text); });
-    println!("{:<18}  {:>10.1}  {:>10.2}", "trigram", ms(t), mbps(t / runs as u128));
+    let t = time_it(runs, || {
+        trigram.convert(&text);
+    });
+    println!(
+        "{:<18}  {:>10.1}  {:>10.2}",
+        "trigram",
+        ms(t),
+        mbps(t / runs as u128)
+    );
 
     // opencc baseline
     let _ = std::fs::write("/tmp/bench-input.txt", &text);
@@ -59,7 +78,12 @@ fn main() {
             .expect("opencc");
         assert!(out.status.success());
     });
-    println!("{:<18}  {:>10.1}  {:>10.2}", "opencc s2t", ms(t), mbps(t / runs as u128));
+    println!(
+        "{:<18}  {:>10.1}  {:>10.2}",
+        "opencc s2t",
+        ms(t),
+        mbps(t / runs as u128)
+    );
 }
 
 fn time_it<F: FnMut()>(runs: usize, mut f: F) -> u128 {

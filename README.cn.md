@@ -11,12 +11,12 @@
 
 ## 为什么做
 
-OpenCC 是事实上的中文转换库，但它的参考实现是一个 C++ 库：依赖 CMake 构建、运行时加载 marisa-trie 二进制、且有[内存安全漏洞记录](https://github.com/BYVoid/OpenCC/issues/997)。`zhhz` 是从零开始的 Rust 移植：
+OpenCC 是事实上的中文转换库。`zhhz` 是基于同一套词典从零开始的 Rust 重写，目标是：
 
 - **单一自包含二进制。** 数据通过 `include_str!` 内嵌，不随安装额外抓取任何东西。
-- **天然内存安全** —— 没有 C++，转换核心没有 `unsafe`。
-- **支持自定义转换词**，优先级最高，适用于术语、品牌词或领域词汇。
-- **持续跟进上游数据**，通过可复现的固定 SHA 同步脚本（`scripts/sync-opencc.sh`）。
+- **天然内存安全** —— 纯 Rust，转换核心没有 `unsafe`。
+- **友好的自定义转换词支持**，优先级最高，适用于术语、品牌词或领域词汇。
+- **与上游数据同步**，通过可复现的固定 SHA 同步脚本（`scripts/sync-opencc.sh`）。
 
 ## 为 AI agent 而设计
 
@@ -55,6 +55,17 @@ git clone https://github.com/ljh-sh/zhhz
 cd zhhz
 cargo build --release   # 二进制在 target/release/zhhz
 ```
+
+### npm
+
+```sh
+npm install zhhz
+```
+
+同一转换核心的 WebAssembly 编译版本,零原生依赖,OpenCC 词典嵌入 `.wasm`。
+完整 API 见 [`docs/npm.md`](docs/npm.md),可运行 demo 见
+[`examples/node-usage/`](examples/node-usage/)。API 表面比 `opencc-js`
+更丰富(`detect()`、内省、Converter 工厂类、语义化区域标志)。
 
 ## 用法
 
@@ -126,6 +137,27 @@ assert_eq!(c.convert("买软件"), "買軟體");
 
 引擎是纯 Rust，依赖极少（`serde_json`、`anyhow`），无文件系统与网络访问，便于后续绑定 WASM 与 Python（均在路线图中）。
 
+## Node.js / npm
+
+```sh
+npm install zhhz
+```
+
+```js
+import { convert, detect, Converter, listConfigs } from "zhhz";
+
+console.log(convert("汉字", "s2t"));            // 漢字
+console.log(detect("他去了西維珍尼亞州"));      // { region: "cn-hk", confidence: 70 }
+
+const c = new Converter("s2twp");
+console.log(c.convert("信息"));                 // 資訊
+console.log(c.convertWithCustom("买软件", [["软件", "軟體"]])); // 買軟體
+
+console.log(listConfigs()); // 16 个 OpenCC 配置名
+```
+
+npm 包是同一引擎的 WebAssembly 编译版本，词典嵌入 `.wasm`，无需数据目录、无网络请求。API 表面比 `opencc-js` 更丰富（新增 `detect()`、内省、Converter 工厂类、语义化区域标志）。完整文档见 [`docs/npm.md`](docs/npm.md)，可运行 demo 见 [`examples/node-usage/`](examples/node-usage/)。
+
 ## 工作原理
 
 `zhhz` 严格复刻 OpenCC 的流水线：
@@ -149,8 +181,8 @@ scripts/sync-opencc.sh 1.3.1      # 指定 tag/commit
 ## 路线图
 
 - [x] 纯 Rust 引擎、全部 16 个 OpenCC 配置、数据内嵌、自定义词
+- [x] WASM 构建 + npm 包（`wasm32-unknown-unknown`）— `npm install zhhz`
 - [ ] 与 `opencc` CLI 的差分模糊测试，证明输出一致
-- [ ] WASM 构建 + npm 包（`wasm32-unknown-unknown`）
 - [ ] Python 原生扩展（PyO3 / `maturin`）
 - [ ] 紧凑词库表示（FST / 双数组 trie）以缩小二进制
 

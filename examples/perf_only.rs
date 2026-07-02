@@ -7,7 +7,9 @@ use std::time::Instant;
 use zhhz::{Config, Converter, NgramMode, NgramModel};
 
 fn main() {
-    let arg_mode = std::env::args().nth(1).unwrap_or_else(|| "fast".to_string());
+    let arg_mode = std::env::args()
+        .nth(1)
+        .unwrap_or_else(|| "fast".to_string());
 
     // Arg 4 (optional): path to a corpus file. If absent, use built-in realistic.
     let text: String = if let Some(path) = std::env::args().nth(4) {
@@ -38,10 +40,12 @@ fn main() {
 
     // Hot: warmup + measured runs
     // Arg 2 = total measured runs. Arg 3 (optional) = warmup runs.
-    let runs: usize = std::env::args().nth(2)
+    let runs: usize = std::env::args()
+        .nth(2)
         .and_then(|s| s.parse().ok())
         .unwrap_or(20);
-    let warmup: usize = std::env::args().nth(3)
+    let warmup: usize = std::env::args()
+        .nth(3)
         .and_then(|s| s.parse().ok())
         .unwrap_or(3);
 

@@ -187,14 +187,10 @@ fn parse_args(argv: Vec<String>) -> Result<Action> {
         ));
     }
     // Mode flag mutual exclusion
-    let explicit = [
-        ModeFlag::Fast,
-        ModeFlag::Bigram,
-        ModeFlag::Trigram,
-    ]
-    .iter()
-    .filter(|m| cli.mode_flag == **m)
-    .count();
+    let explicit = [ModeFlag::Fast, ModeFlag::Bigram, ModeFlag::Trigram]
+        .iter()
+        .filter(|m| cli.mode_flag == **m)
+        .count();
     if explicit > 1 {
         return Err(anyhow::anyhow!(
             "--fast, --bigram and --trigram are mutually exclusive"

@@ -13,12 +13,13 @@ The name is a palindrome: **zh** hanzi, and **z**huan **h**uan **h**an **z**i (�
 
 ## Why
 
-OpenCC is the de-facto Chinese-conversion library, but its reference implementation is a C++ library with a CMake build, marisa-trie binaries loaded at runtime, and a [memory-safety bug history](https://github.com/BYVoid/OpenCC/issues/997). `zhhz` is a from-scratch Rust port that:
+OpenCC is the de-facto Chinese-conversion library. `zhhz` is a from-scratch
+Rust reimplementation built around the same dictionaries, designed to be:
 
-- **Is one self-contained binary.** Data is embedded via `include_str!`; nothing is fetched or installed alongside it.
-- **Is memory-safe by construction** — no C++, no `unsafe` in the conversion core.
-- **Supports custom conversion words** at the highest priority, for terminology, branding, or domain vocabulary.
-- **Tracks upstream data** via a pinned, reproducible sync script (`scripts/sync-opencc.sh`).
+- **One self-contained binary.** Data is embedded via `include_str!`; nothing is fetched or installed alongside it.
+- **Memory-safe by construction** — pure Rust in the conversion core.
+- **Friendly to custom conversion words** at the highest priority, for terminology, branding, or domain vocabulary.
+- **Tracked against upstream data** via a pinned, reproducible sync script (`scripts/sync-opencc.sh`).
 
 ## Designed for AI agents
 
@@ -65,6 +66,20 @@ git clone https://github.com/ljh-sh/zhhz
 cd zhhz
 cargo build --release   # binary at target/release/zhhz
 ```
+
+### npm
+
+```sh
+npm install zhhz
+```
+
+Same conversion core, compiled to WebAssembly. Zero native deps; the
+OpenCC dictionaries are baked into the `.wasm`. See
+[`docs/npm.md`](docs/npm.md) for the full API and
+[`examples/node-usage/`](examples/node-usage/) for a runnable demo.
+The npm API surface is **strictly richer than `opencc-js`** (adds
+`detect()`, introspection, `Converter` factory class, semantic region
+flags).
 
 ## Usage
 
@@ -152,6 +167,32 @@ The engine is pure Rust with a tiny dependency tree (`serde_json`, `anyhow`) and
 filesystem or network access, so it is straightforward to bind from WASM and Python
 (both are on the roadmap).
 
+## Node.js / npm
+
+```sh
+npm install zhhz
+```
+
+```js
+import { convert, detect, Converter, listConfigs } from "zhhz";
+
+console.log(convert("汉字", "s2t"));            // 漢字
+console.log(detect("他去了西維珍尼亞州"));      // { region: "cn-hk", confidence: 70 }
+
+const c = new Converter("s2twp");
+console.log(c.convert("信息"));                 // 資訊
+console.log(c.convertWithCustom("买软件", [["软件", "軟體"]])); // 買軟體
+
+console.log(listConfigs()); // 16 OpenCC config names
+```
+
+The npm package ships the same engine compiled to WebAssembly; dictionaries
+are embedded, so there is no data directory to ship alongside and no network
+fetch at runtime. The surface is strictly richer than `opencc-js` (adds
+`detect()`, introspection, factory instance, semantic region flags).
+See [`docs/npm.md`](docs/npm.md) for the full reference and
+[`examples/node-usage/`](examples/node-usage/) for a runnable demo.
+
 ## How it works
 
 `zhhz` reproduces OpenCC's pipeline exactly:
@@ -185,8 +226,8 @@ scripts/sync-opencc.sh 1.3.1      # a specific tag/commit
 ## Roadmap
 
 - [x] Pure-Rust engine, all 16 OpenCC configs, embedded data, custom words
+- [x] WASM build + npm package (`wasm32-unknown-unknown`) — `npm install zhhz`
 - [ ] Differential-fuzz harness proving output parity vs the `opencc` CLI
-- [ ] WASM build + npm package (`wasm32-unknown-unknown`)
 - [ ] Python native extension (PyO3 / `maturin`)
 - [ ] Compact dictionary representation (FST / double-array) for smaller binaries
 

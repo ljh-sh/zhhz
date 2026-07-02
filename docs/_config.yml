@@ -1,0 +1,19 @@
+title: zhhz
+description: Self-contained Simplified/Traditional Chinese converter — pure-Rust, data-embedded OpenCC reimplementation with CLI, Rust library, npm (WASM) and planned Python bindings.
+baseurl: "/zhhz"
+url: "https://ljh-sh.github.io"
+
+permalink: pretty
+
+markdown: kramdown
+kramdown:
+  input: GFM
+  syntax_highlighter: rouge
+
+plugins:
+  - jekyll-relative-links
+  - jekyll-sitemap
+
+relative_links:
+  enabled: true
+  collections: true

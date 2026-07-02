@@ -194,6 +194,12 @@ jobs:
           echo "::notice::Wrote changelog/${NEXT}.test.md and .test.cn.md"
 
       - name: Commit test report
+        # Skip on PRs: a PR HEAD is detached (`refs/pull/N/head`), so
+        # `git push origin HEAD` fails with "not a full refname". The
+        # test-report commit only matters on direct main pushes (the
+        # bot writes the green-report marker that build-and-release.yml
+        # consumes).
+        if: github.event_name != 'pull_request'
         env:
           NEXT: ${{ needs.discover.outputs.next_version }}
         run: |
