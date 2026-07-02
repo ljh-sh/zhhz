@@ -1,0 +1,136 @@
+name: Build & publish Python wheels (zhhz)
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions: read-all
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+  # manylinux/musllinux wheels for CPython 3.9 - 3.13.
+  MATURIN_PYTHON_VERSIONS: "3.9 3.10 3.11 3.12 3.13"
+
+jobs:
+  python-test:
+    # Smoke-test the python module on every push + PR. Builds a wheel
+    # via maturin (no publish), installs it in a venv, runs a small
+    # smoke script that exercises convert / detect / Converter.
+    name: Smoke test (${{ matrix.os }} / py${{ matrix.python }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        python: ["3.12"]   # smoke matrix: one recent Python per OS
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Setup Rust (pinned)
+        uses: actions-rust-lang/setup-rust-toolchain@4d1965c9142484e48d40c19de54b5cba84953a06 # v1.10.0
+        with:
+          toolchain: stable-2024-11-28
+
+      - name: Setup Python ${{ matrix.python }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+
+      - name: Install maturin
+        run: pip install --quiet "maturin>=1.0,<2.0"
+
+      - name: Build wheel + install into venv
+        run: |
+          python -m venv .venv
+          . .venv/bin/activate || .venv\Scripts\activate
+          maturin build --release --features python --interpreter $(which python)
+          # Install the wheel maturin just produced.
+          pip install --find-links target/wheels zhhz
+
+      - name: Smoke
+        shell: bash
+        run: |
+          . .venv/bin/activate || .venv\Scripts\activate
+          python -c "
+          import zhhz
+          assert zhhz.convert('汉字', 's2t') == '漢字'
+          assert zhhz.convert('信息', 's2twp') == '資訊'
+          d = zhhz.detect('他去了西維珍尼亞州')
+          assert d and d.region == 'cn-hk' and d.confidence >= 30
+          assert len(zhhz.configs()) == 16
+          assert len(zhhz.locales()) == 6
+          c = zhhz.Converter.for_region('cn-s', 'cn-tw')
+          assert c.config == 's2twp'
+          assert c.convert_with_custom('买软件', [['软件', '軟體']]) == '買軟體'
+          print('python smoke OK')
+          "
+
+  publish-pypi:
+    # Build manylinux + musllinux + macOS + Windows wheels for the
+    # current Python versions and publish to PyPI on tag push.
+    # Requires the org secret `PYPI_API_TOKEN` (create at
+    # https://pypi.org/manage/account/token/, scope "project: zhhz").
+    name: Build & publish wheels to PyPI
+    needs: python-test
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write   # required for PyPI trusted-publishing (future)
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Setup Rust (pinned)
+        uses: actions-rust-lang/setup-rust-toolchain@4d1965c9142484e48d40c19de54b5cba84953a06 # v1.10.0
+        with:
+          toolchain: stable-2024-11-28
+
+      - name: Install maturin
+        run: pip install --quiet "maturin>=1.0,<2.0"
+
+      - name: Build + publish with maturin
+        env:
+          MATURIN_PYPI_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
+        run: |
+          maturin publish --release --features python \
+            --username __token__ \
+            --password "$MATURIN_PYPI_TOKEN" \
+            --no-strip
+
+  publish-dryrun:
+    # Exercises the PyPI publish path without burning a version.
+    # Trigger from the GH UI: Actions → Build & publish Python wheels →
+    # Run workflow.
+    name: Build wheels (dry-run)
+    needs: python-test
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Setup Rust (pinned)
+        uses: actions-rust-lang/setup-rust-toolchain@4d1965c9142484e48d40c19de54b5cba84953a06 # v1.10.0
+        with:
+          toolchain: stable-2024-11-28
+
+      - name: Install maturin
+        run: pip install --quiet "maturin>=1.0,<2.0"
+
+      - name: Build wheels (no publish)
+        run: |
+          maturin build --release --features python \
+            --interpreter $(which python3.12) \
+            --manylinux 2>&0 --musllinux 2>&0 --strip
+          echo "--- wheel contents ---"
+          ls -la target/wheels/
+          for w in target/wheels/*.whl; do
+            python -m zipfile -l "$w" | head -10
+            echo
+          done
