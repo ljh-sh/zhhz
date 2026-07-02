@@ -46,10 +46,12 @@ jobs:
         run: pip install --quiet "maturin>=1.0,<2.0"
 
       - name: Build wheel + install into venv
+        # Force bash so the venv-Python path expansion below works on
+        # Windows runners (default there is PowerShell, which doesn't
+        # understand $VENV_PY / '$(pwd)' / POSIX test syntax).
+        shell: bash
         run: |
           python -m venv .venv
-          # Invoke the venv's python directly to avoid cross-platform
-          # activate-script issues (bash.exe on Windows vs POSIX shell).
           VENV_PY="$(pwd)/.venv/bin/python"
           [ -x "$VENV_PY" ] || VENV_PY="$(pwd)/.venv/Scripts/python.exe"
           "$VENV_PY" -m pip install --quiet "maturin>=1.0,<2.0"
