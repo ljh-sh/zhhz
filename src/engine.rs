@@ -614,8 +614,8 @@ fn convert_segment_into(
                 'outer: for c in &cands {
                     if let Some(ch) = c.chars().next() {
                         let s = ch.to_string();
-                        for j in 0..first_chars_count {
-                            if first_chars_buf[j] == s {
+                        for item in first_chars_buf.iter().take(first_chars_count) {
+                            if *item == s {
                                 continue 'outer;
                             }
                         }
@@ -675,8 +675,6 @@ fn convert_segment_into(
                             }
                         }
                     }
-                } else if first_chars_count == 1 {
-                    out.extend_from_slice(cands[0].as_bytes());
                 } else {
                     out.extend_from_slice(cands[0].as_bytes());
                 }
@@ -736,7 +734,7 @@ fn last_n_bytes_str(out: &[u8], max_bytes: usize) -> &str {
 ///
 /// **perf (zhhz#32, T1.1)**: replaces the old `combined: String = prev + out`
 /// + `combined.chars().rev().take(2).collect()` pattern that allocated
-/// twice per multi-value match.
+///   twice per multi-value match.
 #[inline]
 fn last_n_chars<'a>(prev: &'a str, out: &'a str, n: usize) -> &'a str {
     if out.is_empty() || out.chars().count() < n {

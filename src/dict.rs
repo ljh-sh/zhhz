@@ -17,6 +17,7 @@
 //! 1. Insert with a `HashMap<char, u32>` child map (O(1) amortised insert)
 //!    into the arena node.
 //! 2. `finalize()` drains each `HashMap` into a sorted `Vec<(char, u32)>`.
+//!
 //! The query then never touches the build-time HashMap.
 
 use std::collections::HashMap;
