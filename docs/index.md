@@ -5,14 +5,21 @@ title: Home
 
 <div class="hero">
   <h1>zhhz</h1>
-  <p>Self-contained Simplified/Traditional Chinese converter — pure-Rust reimplementation of OpenCC. CLI, Rust library, npm (WASM), and a planned Python binding.</p>
+  <p>Self-contained Simplified/Traditional Chinese converter — pure-Rust reimplementation of OpenCC. CLI, Rust library, npm (WASM), and a native Python binding — all backed by the same engine and the same embedded OpenCC dictionaries.</p>
   <div class="cta">
     <a class="btn primary" href="{{ '/install' | relative_url }}">Install</a>
-    <a class="btn secondary" href="{{ '/cli' | relative_url }}">CLI usage</a>
-    <a class="btn secondary" href="{{ '/npm' | relative_url }}">Node.js</a>
-    <a class="btn secondary" href="https://github.com/ljh-sh/zhhz" target="_blank" rel="noopener">GitHub</a>
+    <a class="btn secondary" href="{{ '/demo' | relative_url }}">Live demo</a>
+    <a class="btn secondary" href="{{ '/npm' | relative_url }}">npm API</a>
+    <a class="btn secondary" href="{{ '/python' | relative_url }}">Python API</a>
   </div>
 </div>
+
+<p style="text-align:center;color:var(--text-secondary);font-size:0.85rem;margin-top:-0.5rem;">
+<a href="https://www.npmjs.com/package/zhhz"><img alt="npm" src="https://img.shields.io/npm/v/zhhz?color=cb3837&logo=npm&logoColor=white"></a>
+&nbsp;<a href="https://pypi.org/project/zhhz/"><img alt="PyPI" src="https://img.shields.io/pypi/v/zhhz?color=3776ab&logo=python&logoColor=white"></a>
+&nbsp;<a href="https://crates.io/crates/zhhz"><img alt="crates.io" src="https://img.shields.io/crates/v/zhhz?color=fc8d62&logo=rust&logoColor=white"></a>
+&nbsp;<a href="https://github.com/ljh-sh/zhhz/blob/main/LICENSE"><img alt="License" src="https://img.shields.io/badge/license-Apache_2.0-blue.svg"></a>
+</p>
 
 ## What is zhhz?
 
@@ -37,18 +44,25 @@ assert_eq!(c.convert("汉字"), "漢字");
 import { convert, detect, Converter } from "zhhz";
 console.log(convert("汉字", "s2t"));            // 漢字
 console.log(detect("他去了西維珍尼亞州"));      // { region: "cn-hk", ... }
+
+# Python
+import zhhz
+print(zhhz.convert("信息", "s2twp"))   # 資訊
+print(zhhz.detect("汉字计算机软件"))  # Detection(region='cn-s', confidence=57)
 ```
 
-## Distribution channels
+## Four distribution channels, one engine
 
-| Channel | Audience | Status |
-|---|---|---|
-| CLI (`zhhz` binary) | Shell, AI agents, scripts | Ships today (v0.7.x) |
-| Rust library (`cargo install zhhz`) | Rust consumers | Ships today (crates.io) |
-| npm (`npm install zhhz`) | Node.js / browsers | Ships today (v0.7.8) |
-| Python (`pip install zhhz`) | Python consumers | [Roadmap]({{ '/python' | relative_url }}); use the CLI via subprocess today |
+| Channel | Audience | Install | Perf on 5 MiB corpus |
+|---|---|---|---:|
+| **CLI** | Shell, AI agents, scripts | `cargo install zhhz` / [binary](https://github.com/ljh-sh/zhhz/releases) | **88 MB/s** (s2t, native) |
+| **Rust library** | Rust consumers | `[dependencies] zhhz = "0.7"` | same as CLI |
+| **npm** | Node.js / browsers | `npm install zhhz` | 63 MB/s (s2t, WASM) |
+| **Python** | Python consumers | `pip install zhhz` | same as Rust (native in-process) |
 
-## For AI agents
+All four share the same Rust conversion core. Conversion output is byte-identical to the OpenCC reference CLI on all 538 supported-config cases.
+
+## Designed for AI agents
 
 `zhhz` is built first for AI agents (Claude, Cursor, custom LLM pipelines, batch jobs). The CLI is deliberately minimal:
 
@@ -56,13 +70,23 @@ console.log(detect("他去了西維珍尼亞州"));      // { region: "cn-hk", .
 - stdin / stdout friendly. `-` means stdin; positional args are files.
 - Stable, predictable, safe. Same input → byte-identical output every time.
 - No network, no filesystem writes unless asked (`--in-place`), no temp files.
+- Single self-contained binary — drop it in a container and it just works.
+
+## What makes zhhz different
+
+- **Embedded dictionaries**: no `data/` directory, no runtime fetch, no marisa-trie to load. Build with `include_str!` and ship one binary.
+- **One engine, four channels**: the same Rust core produces the CLI binary, the npm WebAssembly artifact, the Python `pip install` wheel, and the Rust library. No behavioral drift.
+- **Strict superset of `opencc-js`**: same npm install path, same `Converter({from,to})` factory, same custom-words API — plus script-variant detection, introspection (`listConfigs` / `listLocales`), and semantic region flags (`Converter.forRegion("cn-s", "cn-tw")`). See [npm API]({{ '/npm' | relative_url }}) for the full comparison.
+- **Memory-safe by construction** — pure Rust, no `unsafe` in the conversion core.
+- **APLv2-licensed**, vendored dictionaries from upstream OpenCC.
 
 ## Where to go next
 
-- [Install zhhz]({{ '/install' | relative_url }}) — Cargo, npm, direct binary, or build from source
+- [Install zhhz]({{ '/install' | relative_url }}) — Cargo, npm, pip, direct binary, or build from source
+- [Live demo]({{ '/demo' | relative_url }}) — try it in your browser, no install needed
 - [CLI reference]({{ '/cli' | relative_url }}) — every flag, every config, examples
 - [Rust library]({{ '/library' | relative_url }}) — embedding zhhz in a Rust project
 - [Node.js / npm]({{ '/npm' | relative_url }}) — `npm install zhhz`, full API reference
-- [Python integration]({{ '/python' | relative_url }}) — today's subprocess path + planned PyO3 binding
-- [Why zhhz]({{ '/why' | relative_url }}) — design goals, scope, and what zhhz doesn't try to be
+- [Python integration]({{ '/python' | relative_url }}) — `pip install zhhz`, threading, async-wrap recipe
+- [Why zhhz]({{ '/why' | relative_url }}) — design goals, scope, what zhhz is NOT
 - [FAQ]({{ '/faq' | relative_url }}) — common questions
