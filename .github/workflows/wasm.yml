@@ -100,7 +100,15 @@ jobs:
         # argument as a package-name spec and finds the unrelated
         # `pkg@5.8.1` on the npm registry. (First publish attempt shipped
         # an unrelated package before this fix; the dry-run caught it.)
-        run: npm publish ./pkg --access public
+        run: |
+          # Debug: confirm the token resolves to a real npm identity before
+          # we attempt to publish. Surfaces revoked / wrong-scope tokens
+          # as a clear `whoami failed` rather than a generic ENEEDAUTH.
+          if ! npm whoami; then
+            echo "::error::npm whoami failed — NPM_TOKEN is missing, revoked, or wrong-scoped"
+            exit 1
+          fi
+          npm publish ./pkg --access public
 
   publish-dryrun:
     # Exercise the publish path without burning an npm version.
