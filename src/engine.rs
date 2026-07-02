@@ -466,9 +466,7 @@ fn convert_through_chain_into(
     // Fast path: single stage, no ngram. Write directly to the tail of
     // scratch, no intermediate buffer.
     if chain.len() == 1 && ngram.is_none() {
-        convert_segment_into(
-            segment, &chain[0], ngram, mode, "", scratch,
-        );
+        convert_segment_into(segment, &chain[0], ngram, mode, "", scratch);
         return;
     }
     // Slow path: multi-stage chain OR ngram. Build an intermediate
@@ -493,14 +491,12 @@ fn convert_through_chain_into(
         // write into it. After the call, scratch[stage_input_start..]
         // is the new stage output.
         scratch.truncate(stage_input_start);
-        convert_segment_into(
-            &input_owned, stage, ngram, mode, prev_str, scratch,
-        );
+        convert_segment_into(&input_owned, stage, ngram, mode, prev_str, scratch);
         // Update prev for the next stage: take the last 6 bytes of the
         // new output as an owned String (bounded to 2 chars).
         let new_end = scratch.len();
-        let new_start = tail_n_bytes_start(&scratch[stage_input_start..new_end], 6)
-            + stage_input_start;
+        let new_start =
+            tail_n_bytes_start(&scratch[stage_input_start..new_end], 6) + stage_input_start;
         stage_prev_owned = Some(unsafe {
             std::str::from_utf8_unchecked(&scratch[new_start..new_end]).to_string()
         });
@@ -509,7 +505,8 @@ fn convert_through_chain_into(
     // caller's prev_emit_buf.
     if ngram.is_some() {
         let segment_end = scratch.len();
-        let tail_start = tail_n_bytes_start(&scratch[stage_input_start..segment_end], 6) + stage_input_start;
+        let tail_start =
+            tail_n_bytes_start(&scratch[stage_input_start..segment_end], 6) + stage_input_start;
         prev_emit_buf.clear();
         prev_emit_buf.extend_from_slice(&scratch[tail_start..segment_end]);
     }
@@ -611,9 +608,8 @@ fn convert_segment_into(
         if let Some((key_len, cands)) = group_longest_prefix_multi(group, rest) {
             if cands.len() > 1 {
                 let model = ngram.unwrap();
-                let mut first_chars_buf: [String; 4] = [
-                    String::new(), String::new(), String::new(), String::new(),
-                ];
+                let mut first_chars_buf: [String; 4] =
+                    [String::new(), String::new(), String::new(), String::new()];
                 let mut first_chars_count: usize = 0;
                 'outer: for c in &cands {
                     if let Some(ch) = c.chars().next() {
@@ -665,8 +661,7 @@ fn convert_segment_into(
                         } else {
                             Some(chosen)
                         };
-                        let first_chars_slice: &[String] =
-                            &first_chars_buf[..first_chars_count];
+                        let first_chars_slice: &[String] = &first_chars_buf[..first_chars_count];
                         let pick = model
                             .disambiguate(prev_opt, first_chars_slice)
                             .unwrap_or_else(|| first_chars_buf[0].clone());
@@ -708,7 +703,11 @@ fn last_n_bytes_str(out: &[u8], max_bytes: usize) -> &str {
     if out.is_empty() || max_bytes == 0 {
         return "";
     }
-    let start = if out.len() <= max_bytes { 0 } else { out.len() - max_bytes };
+    let start = if out.len() <= max_bytes {
+        0
+    } else {
+        out.len() - max_bytes
+    };
     let mut s = start;
     while s < out.len() && (out[s] & 0xC0) == 0x80 {
         s += 1;
@@ -717,7 +716,6 @@ fn last_n_bytes_str(out: &[u8], max_bytes: usize) -> &str {
     // &str bytes).
     unsafe { std::str::from_utf8_unchecked(&out[s..]) }
 }
-
 
 /// Return a `&str` borrowing the last `n` chars of (prev + out), without
 /// any allocation. Handles the cases:
@@ -789,7 +787,6 @@ fn find_non_ascii(bytes: &[u8]) -> usize {
     }
     bytes.len()
 }
-
 
 #[cfg(test)]
 mod tests {

@@ -96,11 +96,7 @@ impl NgramModel {
     /// log10 bigram probability. On ties, the first candidate wins.
     /// If a candidate is missing from the model, it scores -inf; if all
     /// candidates are missing, the first one is returned as the fallback.
-    pub fn disambiguate(
-        &self,
-        prev: Option<&str>,
-        candidates: &[String],
-    ) -> Option<String> {
+    pub fn disambiguate(&self, prev: Option<&str>, candidates: &[String]) -> Option<String> {
         if candidates.is_empty() {
             return None;
         }
@@ -187,8 +183,12 @@ ngram 2=4
     #[test]
     fn parses_unigrams_and_bigrams() {
         let m = make_test_model();
-        assert!(m.bigrams.contains_key(&("齣".to_string(), "好".to_string())));
-        assert!(m.bigrams.contains_key(&("齣".to_string(), "齣".to_string())));
+        assert!(m
+            .bigrams
+            .contains_key(&("齣".to_string(), "好".to_string())));
+        assert!(m
+            .bigrams
+            .contains_key(&("齣".to_string(), "齣".to_string())));
     }
 
     #[test]

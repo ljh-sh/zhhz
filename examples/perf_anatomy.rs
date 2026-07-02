@@ -26,7 +26,10 @@ fn main() {
     let build_start = Instant::now();
     let c = Converter::new(Config::S2t);
     let build_elapsed = build_start.elapsed();
-    eprintln!("build (cold, 1 Converter): {:.2} ms", build_elapsed.as_secs_f64() * 1000.0);
+    eprintln!(
+        "build (cold, 1 Converter): {:.2} ms",
+        build_elapsed.as_secs_f64() * 1000.0
+    );
 
     // Phase 2: warmup (trie + dict are now cached; this exercises allocators)
     for _ in 0..3 {
@@ -44,10 +47,19 @@ fn main() {
     let hot_elapsed = hot_start.elapsed();
     let per_run = hot_elapsed.as_secs_f64() / runs as f64;
     let mbps = byte_count as f64 / 1_048_576.0 / per_run;
-    eprintln!("hot loop: {:.2} ms / run, {:.2} MB/s",
-        per_run * 1000.0, mbps);
-    eprintln!("output: {} bytes / run ({} bytes input)", total_out_bytes / runs, byte_count);
-    eprintln!("per-char hot loop: {:.1} ns/char, {:.2} ns/byte",
+    eprintln!(
+        "hot loop: {:.2} ms / run, {:.2} MB/s",
+        per_run * 1000.0,
+        mbps
+    );
+    eprintln!(
+        "output: {} bytes / run ({} bytes input)",
+        total_out_bytes / runs,
+        byte_count
+    );
+    eprintln!(
+        "per-char hot loop: {:.1} ns/char, {:.2} ns/byte",
         per_run * 1_000_000_000.0 / char_count as f64,
-        per_run * 1_000_000_000.0 / byte_count as f64);
+        per_run * 1_000_000_000.0 / byte_count as f64
+    );
 }

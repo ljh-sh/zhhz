@@ -168,10 +168,7 @@ impl Dict {
     /// `single` and `all` borrow from the dict; the caller can either
     /// emit the first value (fast path) or call into a language model to
     /// disambiguate.
-    pub fn longest_prefix_multi<'a>(
-        &'a self,
-        text: &str,
-    ) -> Option<(usize, Vec<&'a str>)> {
+    pub fn longest_prefix_multi<'a>(&'a self, text: &str) -> Option<(usize, Vec<&'a str>)> {
         let mut node: u32 = 0;
         let mut best: Option<(usize, Vec<&'a str>)> = None;
         for (i, ch) in text.char_indices() {

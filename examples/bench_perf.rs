@@ -29,18 +29,22 @@ fn main() {
     let warmup = 2;
 
     let model = NgramModel::from_file("/tmp/ngram-out/2gram.arpa").ok();
-    let bigram = model.as_ref().map(|m| {
-        Converter::new(Config::S2t).with_ngram(m.clone_model(), NgramMode::Bigram)
-    });
-    let trigram = model.as_ref().map(|m| {
-        Converter::new(Config::S2t).with_ngram(m.clone_model(), NgramMode::Trigram)
-    });
+    let bigram = model
+        .as_ref()
+        .map(|m| Converter::new(Config::S2t).with_ngram(m.clone_model(), NgramMode::Bigram));
+    let trigram = model
+        .as_ref()
+        .map(|m| Converter::new(Config::S2t).with_ngram(m.clone_model(), NgramMode::Trigram));
     let fast = Converter::new(Config::S2t);
 
-    for (label, corpus) in [("realistic", &realistic), ("worst", &worst), ("ascii-y", &ascii_y)] {
+    for (label, corpus) in [
+        ("realistic", &realistic),
+        ("worst", &worst),
+        ("ascii-y", &ascii_y),
+    ] {
         for (mode, conv) in [
-            ("fast",    Some(&fast)),
-            ("bigram",  bigram.as_ref()),
+            ("fast", Some(&fast)),
+            ("bigram", bigram.as_ref()),
             ("trigram", trigram.as_ref()),
         ] {
             if let Some(c) = conv {
@@ -72,7 +76,11 @@ fn main() {
     println!("  {}", &fast_out[..60.min(fast_out.len())]);
 }
 
-struct Stats { mean: f64, stddev: f64, best: f64 }
+struct Stats {
+    mean: f64,
+    stddev: f64,
+    best: f64,
+}
 
 fn measure(c: &Converter, text: &str, runs: usize, warmup: usize) -> Stats {
     let total_runs = runs + warmup;
@@ -89,10 +97,13 @@ fn measure(c: &Converter, text: &str, runs: usize, warmup: usize) -> Stats {
     let mbps = |s: f64| text.len() as f64 / 1_048_576.0 / s;
     let mbps_samples: Vec<f64> = times.iter().map(|t| mbps(*t)).collect();
     let mean = mbps_samples.iter().sum::<f64>() / mbps_samples.len() as f64;
-    let var = mbps_samples.iter().map(|m| (m - mean).powi(2)).sum::<f64>()
-        / mbps_samples.len() as f64;
+    let var =
+        mbps_samples.iter().map(|m| (m - mean).powi(2)).sum::<f64>() / mbps_samples.len() as f64;
     let stddev = var.sqrt();
-    let best = mbps_samples.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+    let best = mbps_samples
+        .iter()
+        .cloned()
+        .fold(f64::NEG_INFINITY, f64::max);
     Stats { mean, stddev, best }
 }
 
@@ -117,10 +128,13 @@ fn measure_opencc(label: &str, text: &str, runs: usize, warmup: usize) -> Stats 
     let mbps = |s: f64| text.len() as f64 / 1_048_576.0 / s;
     let mbps_samples: Vec<f64> = times.iter().map(|t| mbps(*t)).collect();
     let mean = mbps_samples.iter().sum::<f64>() / mbps_samples.len() as f64;
-    let var = mbps_samples.iter().map(|m| (m - mean).powi(2)).sum::<f64>()
-        / mbps_samples.len() as f64;
+    let var =
+        mbps_samples.iter().map(|m| (m - mean).powi(2)).sum::<f64>() / mbps_samples.len() as f64;
     let stddev = var.sqrt();
-    let best = mbps_samples.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+    let best = mbps_samples
+        .iter()
+        .cloned()
+        .fold(f64::NEG_INFINITY, f64::max);
     Stats { mean, stddev, best }
 }
 

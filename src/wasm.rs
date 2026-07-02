@@ -37,7 +37,8 @@ use wasm_bindgen::prelude::*;
 
 use crate::detect;
 use crate::engine::{
-    region_pair_config, Config as EngineConfig, Converter as EngineConverter, Region as EngineRegion,
+    region_pair_config, Config as EngineConfig, Converter as EngineConverter,
+    Region as EngineRegion,
 };
 
 // ===========================================================================
@@ -61,11 +62,7 @@ pub fn convert(text: &str, config: &str) -> Result<String, JsError> {
 ///
 /// Empty pairs (`""`, `" "`, or `null` keys) are skipped.
 #[wasm_bindgen]
-pub fn convert_with_custom(
-    text: &str,
-    config: &str,
-    entries: JsValue,
-) -> Result<String, JsError> {
+pub fn convert_with_custom(text: &str, config: &str, entries: JsValue) -> Result<String, JsError> {
     let cfg = EngineConfig::parse(config).map_err(|e| JsError::new(&e))?;
     let pairs = parse_dict_like(&entries)?;
     Ok(EngineConverter::with_custom(cfg, &pairs).convert(text))
