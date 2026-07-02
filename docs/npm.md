@@ -1,4 +1,10 @@
-# `zhhz` for Node.js (zhhz#40)
+---
+layout: default
+title: Node.js / npm
+permalink: /npm/
+---
+
+# `zhhz` for Node.js
 
 The npm package `zhhz` ships the same conversion engine as the `zhhz` CLI,
 compiled to WebAssembly. OpenCC dictionaries are baked into the `.wasm`
