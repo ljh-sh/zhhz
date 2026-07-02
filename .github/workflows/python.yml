@@ -48,16 +48,20 @@ jobs:
       - name: Build wheel + install into venv
         run: |
           python -m venv .venv
-          . .venv/bin/activate || .venv\Scripts\activate
-          maturin build --release --features python --interpreter $(which python)
-          # Install the wheel maturin just produced.
-          pip install --find-links target/wheels zhhz
+          # Invoke the venv's python directly to avoid cross-platform
+          # activate-script issues (bash.exe on Windows vs POSIX shell).
+          VENV_PY="$(pwd)/.venv/bin/python"
+          [ -x "$VENV_PY" ] || VENV_PY="$(pwd)/.venv/Scripts/python.exe"
+          "$VENV_PY" -m pip install --quiet "maturin>=1.0,<2.0"
+          "$VENV_PY" -m maturin build --release --features python
+          "$VENV_PY" -m pip install --find-links target/wheels zhhz
 
       - name: Smoke
         shell: bash
         run: |
-          . .venv/bin/activate || .venv\Scripts\activate
-          python -c "
+          VENV_PY="$(pwd)/.venv/bin/python"
+          [ -x "$VENV_PY" ] || VENV_PY="$(pwd)/.venv/Scripts/python.exe"
+          "$VENV_PY" -c "
           import zhhz
           assert zhhz.convert('汉字', 's2t') == '漢字'
           assert zhhz.convert('信息', 's2twp') == '資訊'
