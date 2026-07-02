@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>zhhz demo — live browser conversion</title>
+  <link rel="stylesheet" href="{{ '/assets/css/style.css' | relative_url }}">
+  <style>
+    .demo-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; margin: 2rem 0; }
+    .demo-pane { display: flex; flex-direction: column; }
+    .demo-pane label { font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 0.4rem; }
+    .demo-pane textarea { min-height: 220px; padding: 0.75rem; font-family: ui-monospace, SFMono-Regular, monospace; font-size: 0.95rem; background: var(--surface-2); color: var(--text); border: 1px solid var(--border); border-radius: 6px; resize: vertical; }
+    .demo-pane textarea:focus { outline: none; border-color: #58a6ff; }
+    .demo-controls { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; margin: 1rem 0; }
+    .demo-controls select, .demo-controls input { padding: 0.4rem 0.6rem; background: var(--surface-2); color: var(--text); border: 1px solid var(--border); border-radius: 6px; font-size: 0.9rem; }
+    .demo-controls button { padding: 0.45rem 0.9rem; background: #21262d; color: var(--text); border: 1px solid var(--border); border-radius: 6px; cursor: pointer; font-size: 0.9rem; }
+    .demo-controls button:hover { background: #30363d; }
+    .demo-controls button.primary { background: #238636; border-color: #2ea043; }
+    .demo-controls button.primary:hover { background: #2ea043; }
+    .demo-status { font-size: 0.8rem; color: var(--text-secondary); padding: 0.4rem 0.6rem; background: var(--surface-2); border-radius: 4px; margin-left: auto; }
+    .demo-status.ready { color: #3fb950; }
+    .demo-status.error { color: #f85149; }
+    .demo-result-readonly { white-space: pre-wrap; word-break: break-word; padding: 0.75rem; background: var(--surface-2); border: 1px solid var(--border); border-radius: 6px; min-height: 220px; font-family: ui-monospace, SFMono-Regular, monospace; font-size: 0.95rem; color: var(--text); }
+    .demo-result-readonly.empty { color: var(--text-secondary); font-style: italic; }
+    .demo-section-title { font-size: 0.9rem; color: var(--text-secondary); margin: 1.5rem 0 0.5rem; text-transform: uppercase; letter-spacing: 0.05em; }
+    @media (max-width: 720px) { .demo-grid { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+  <header class="site-header">
+    <div class="container">
+      <a class="site-title" href="{{ '/' | relative_url }}">zhhz</a>
+      <nav class="site-nav">
+        <a href="{{ '/install' | relative_url }}">Install</a>
+        <a href="{{ '/demo' | relative_url }}">Demo</a>
+        <a href="{{ '/cli' | relative_url }}">CLI</a>
+        <a href="{{ '/library' | relative_url }}">Rust library</a>
+        <a href="{{ '/npm' | relative_url }}">Node.js</a>
+        <a href="{{ '/python' | relative_url }}">Python</a>
+        <a href="https://github.com/ljh-sh/zhhz" target="_blank" rel="noopener">GitHub</a>
+      </nav>
+    </div>
+  </header>
+
+  <main class="container">
+    <article class="page-content">
+      <h1>Live demo</h1>
+      <p>zhhz compiled to WebAssembly, running entirely in your browser. No network calls, no server, no data leaves the page. The OpenCC dictionaries (~1.3 MiB) are bundled into the <code>.wasm</code> blob and cached after the first load.</p>
+
+      <div class="demo-status" id="status">loading wasm…</div>
+
+      <div class="demo-grid">
+        <div class="demo-pane">
+          <label for="input">Input (any of the 16 OpenCC configs supported)</label>
+          <textarea id="input" placeholder="输入中文 (e.g. 汉字计算机软件)">汉字计算机软件</textarea>
+        </div>
+        <div class="demo-pane">
+          <label for="output">Output</label>
+          <div class="demo-result-readonly empty" id="output">点击 Convert 后显示结果。</div>
+        </div>
+      </div>
+
+      <div class="demo-controls">
+        <label>Config:</label>
+        <select id="config">
+          <option value="s2t">s2t — Simplified → Traditional</option>
+          <option value="t2s">t2s — Traditional → Simplified</option>
+          <option value="s2tw">s2tw — Simplified → Traditional (Taiwan)</option>
+          <option value="s2twp" selected>s2twp — …with Taiwan phrases</option>
+          <option value="s2hk">s2hk — Simplified → Traditional (HK)</option>
+          <option value="s2hkp">s2hkp — …with HK phrases</option>
+          <option value="t2jp">t2jp — Traditional → Japanese Shinjitai</option>
+        </select>
+        <button class="primary" id="convert">Convert</button>
+        <button id="detect">Detect script variant</button>
+        <span id="detect-result" class="demo-result-readonly empty" style="min-height:0; padding:0.3rem 0.6rem; font-size:0.85rem;"></span>
+      </div>
+
+      <div class="demo-section-title">Try the npm package</div>
+      <pre><code>npm install zhhz
+node -e 'const { convert } = require("zhhz"); console.log(convert("汉字", "s2t"));'</code></pre>
+    </article>
+  </main>
+
+  <footer class="site-footer">
+    <div class="container">
+      <p>zhhz demo · WebAssembly + <code>wasm-bindgen</code> · source on <a href="https://github.com/ljh-sh/zhhz" target="_blank" rel="noopener">github.com/ljh-sh/zhhz</a>.</p>
+    </div>
+  </footer>
+
+  <!-- Load the wasm-bindgen web-target glue. This file is produced by
+       `wasm-pack build --target web --features wasm` and committed to
+       the repo as docs/demo/zhhz.js + docs/demo/zhhz_bg.wasm. -->
+  <script type="module">
+    import init, { convert, convert_with_custom, detect, listConfigs, listLocales } from "./zhhz.js";
+
+    const status = document.getElementById("status");
+    const input = document.getElementById("input");
+    const output = document.getElementById("output");
+    const configSelect = document.getElementById("config");
+    const convertBtn = document.getElementById("convert");
+    const detectBtn = document.getElementById("detect");
+    const detectResult = document.getElementById("detect-result");
+
+    let initialized = false;
+
+    async function load() {
+      try {
+        await init();
+        initialized = true;
+        status.textContent = "wasm ready · " + listConfigs().length + " configs · " + listLocales().length + " locales";
+        status.classList.add("ready");
+      } catch (e) {
+        status.textContent = "load failed: " + e.message;
+        status.classList.add("error");
+        console.error(e);
+      }
+    }
+
+    convertBtn.addEventListener("click", () => {
+      if (!initialized) return;
+      const text = input.value;
+      const cfg = configSelect.value;
+      try {
+        const out = convert(text, cfg);
+        output.textContent = out || "(empty)";
+        output.classList.toggle("empty", !out);
+      } catch (e) {
+        output.textContent = "error: " + e.message;
+        output.classList.remove("empty");
+      }
+    });
+
+    detectBtn.addEventListener("click", () => {
+      if (!initialized) return;
+      const text = input.value;
+      const d = detect(text);
+      if (d) {
+        detectResult.textContent = d.region + " · " + d.confidence + "%";
+        detectResult.classList.remove("empty");
+      } else {
+        detectResult.textContent = "(no CJK / kana)";
+        detectResult.classList.add("empty");
+      }
+    });
+
+    // Live convert on input (debounced).
+    let timer = null;
+    input.addEventListener("input", () => {
+      clearTimeout(timer);
+      timer = setTimeout(() => convertBtn.click(), 200);
+    });
+
+    load().then(() => {
+      if (initialized) convertBtn.click();
+    });
+  </script>
+</body>
+</html>
