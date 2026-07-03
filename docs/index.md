@@ -14,12 +14,13 @@ title: Home
   </div>
 </div>
 
-<p style="text-align:center;color:var(--text-secondary);font-size:0.85rem;margin-top:-0.5rem;">
-<a href="https://www.npmjs.com/package/zhhz"><img alt="npm" src="https://img.shields.io/npm/v/zhhz?color=cb3837&logo=npm&logoColor=white"></a>
-&nbsp;<a href="https://pypi.org/project/zhhz/"><img alt="PyPI" src="https://img.shields.io/pypi/v/zhhz?color=3776ab&logo=python&logoColor=white"></a>
-&nbsp;<a href="https://crates.io/crates/zhhz"><img alt="crates.io" src="https://img.shields.io/crates/v/zhhz?color=fc8d62&logo=rust&logoColor=white"></a>
-&nbsp;<a href="https://github.com/ljh-sh/zhhz/blob/main/LICENSE"><img alt="License" src="https://img.shields.io/badge/license-Apache_2.0-blue.svg"></a>
-</p>
+<div class="badges">
+  <a href="https://www.npmjs.com/package/zhhz" title="npm package"><img alt="npm" src="https://img.shields.io/npm/v/zhhz?color=cb3837&amp;logo=npm&amp;logoColor=white"></a>
+  <a href="https://pypi.org/project/zhhz/" title="PyPI package"><img alt="PyPI" src="https://img.shields.io/pypi/v/zhhz?color=3776ab&amp;logo=python&amp;logoColor=white"></a>
+  <a href="https://crates.io/crates/zhhz" title="Rust crate"><img alt="crates.io" src="https://img.shields.io/crates/v/zhhz?color=fc8d62&amp;logo=rust&amp;logoColor=white"></a>
+  <a href="https://github.com/ljh-sh/zhhz/blob/main/LICENSE" title="Apache 2.0"><img alt="License" src="https://img.shields.io/badge/license-Apache_2.0-blue.svg"></a>
+  <a href="https://github.com/ljh-sh/zhhz/actions/workflows/wasm.yml" title="CI"><img alt="Build status" src="https://img.shields.io/github/actions/workflow-status/ljh-sh/zhhz/wasm.yml?branch=main&amp;logo=github-actions&amp;logoColor=white"></a>
+</div>
 
 ## What is zhhz?
 
