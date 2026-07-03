@@ -1,0 +1,53 @@
+name: cargo-fuzz (zhhz)
+
+on:
+  # Weekly cron — fuzzing is expensive, run on a schedule rather than
+  # on every commit. The OpenSSF Scorecard looks for a fuzzer integration
+  # (we get a 0 here without one). Schedule: Sundays at 04:00 UTC.
+  schedule:
+    - cron: "0 4 * * 0"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  # Upload corpus on failure for triage.
+  actions: read
+
+jobs:
+  fuzz:
+    name: Fuzz (${{ matrix.target }} · ${{ matrix.runtime }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [fmm_segment, convert_roundtrip]
+        runtime: [60]   # seconds; bump to 3600+ for deep runs
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Install Rust (pinned) + nightly for cargo-fuzz
+        uses: actions-rust-lang/setup-rust-toolchain@4d1965c9142484e48d40c19de54b5cba84953a06 # v1.10.0
+        with:
+          toolchain: stable-2024-11-28
+          components: rustfmt, clippy
+
+      - name: Install nightly toolchain (required by cargo-fuzz)
+        run: |
+          rustup toolchain install nightly --profile minimal --component rust-src
+
+      - name: cargo +nightly install cargo-fuzz
+        run: cargo +nightly install cargo-fuzz
+
+      - name: Run fuzzer
+        run: |
+          cd fuzz
+          cargo +nightly fuzz run ${{ matrix.target }} -- -max_total_time=${{ matrix.runtime }}
+
+      - name: Upload corpus on failure
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: fuzz-corpus-${{ matrix.target }}
+          path: fuzz/corpus/${{ matrix.target }}/
+          retention-days: 7
