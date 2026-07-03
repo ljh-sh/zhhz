@@ -58,7 +58,7 @@ OPTIONS:
                              recursively.
     -0, --null              With --files-from, paths are NUL-separated.
     -i, --in-place          Rewrite each input FILE in place (not stdin).
-    -l, --list              List regions and supported conversions.
+    -l, --list, --ls        List regions and supported conversions.
     -h, --help              Show this help.
     -V, --version           Show version.
 
@@ -123,7 +123,7 @@ fn parse_args(argv: Vec<String>) -> Result<Action> {
         match arg.as_str() {
             "-h" | "--help" => return Ok(Action::Help),
             "-V" | "--version" => return Ok(Action::Version),
-            "-l" | "--list" => cli.list = true,
+            "-l" | "--list" | "--ls" => cli.list = true,
             "-i" | "--in-place" => cli.in_place = true,
             "--auto" => cli.auto = true,
             "-0" | "--null" => cli.null = true,
