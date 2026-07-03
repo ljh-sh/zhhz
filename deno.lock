@@ -1,0 +1,16 @@
+{
+  "version": "5",
+  "specifiers": {
+    "npm:zhhz@0.7.9": "0.7.9"
+  },
+  "npm": {
+    "zhhz@0.7.9": {
+      "integrity": "sha512-NEqpMgBWObabv4C5PFgPooQrv0pAPqRBpJ+s/Q4yU1sDTevs4mBAuxyg2345czBN2BwsMdeOcnd8xZhyV3sS2A=="
+    }
+  },
+  "workspace": {
+    "dependencies": [
+      "npm:zhhz@0.7.9"
+    ]
+  }
+}

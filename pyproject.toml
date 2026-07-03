@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "zhhz"
-version = "0.7.8"
+version = "0.7.9"
 description = "Self-contained Simplified/Traditional Chinese converter — pure-Rust, data-embedded OpenCC reimplementation"
 readme = "README.md"
 license = { text = "Apache-2.0" }
