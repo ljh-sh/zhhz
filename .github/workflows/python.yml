@@ -38,12 +38,12 @@ jobs:
           toolchain: stable-2024-11-28
 
       - name: Setup Python ${{ matrix.python }}
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: ${{ matrix.python }}
 
       - name: Install maturin
-        run: pip install --quiet "maturin>=1.0,<2.0"
+        run: pip install --quiet "maturin==1.14.0"
 
       - name: Build wheel + install into venv
         # Force bash so the venv-Python path expansion below works on
@@ -54,7 +54,7 @@ jobs:
           python -m venv .venv
           VENV_PY="$(pwd)/.venv/bin/python"
           [ -x "$VENV_PY" ] || VENV_PY="$(pwd)/.venv/Scripts/python.exe"
-          "$VENV_PY" -m pip install --quiet "maturin>=1.0,<2.0"
+          "$VENV_PY" -m pip install --quiet "maturin==1.14.0"
           "$VENV_PY" -m maturin build --release --features python
           "$VENV_PY" -m pip install --find-links target/wheels zhhz
 
@@ -98,7 +98,7 @@ jobs:
           toolchain: stable-2024-11-28
 
       - name: Install maturin
-        run: pip install --quiet "maturin>=1.0,<2.0"
+        run: pip install --quiet "maturin==1.14.0"
 
       - name: Build + publish with maturin
         env:
@@ -130,7 +130,7 @@ jobs:
           toolchain: stable-2024-11-28
 
       - name: Install maturin
-        run: pip install --quiet "maturin>=1.0,<2.0"
+        run: pip install --quiet "maturin==1.14.0"
 
       - name: Build wheels (no publish)
         run: |

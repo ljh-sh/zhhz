@@ -123,7 +123,7 @@ jobs:
 
       - name: Install cargo-zigbuild
         if: matrix.cross
-        run: pip install cargo-zigbuild
+        run: pip install cargo-zigbuild==0.19.1
 
       - name: Build
         run: |
