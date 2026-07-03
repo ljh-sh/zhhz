@@ -18,6 +18,7 @@ title: Home
   <a href="https://www.npmjs.com/package/zhhz" title="npm package"><img alt="npm" src="https://img.shields.io/npm/v/zhhz?color=cb3837&amp;logo=npm&amp;logoColor=white"></a>
   <a href="https://pypi.org/project/zhhz/" title="PyPI package"><img alt="PyPI" src="https://img.shields.io/pypi/v/zhhz?color=3776ab&amp;logo=python&amp;logoColor=white"></a>
   <a href="https://crates.io/crates/zhhz" title="Rust crate"><img alt="crates.io" src="https://img.shields.io/crates/v/zhhz?color=fc8d62&amp;logo=rust&amp;logoColor=white"></a>
+  <a href="https://jsr.io/@ljh-sh/zhhz" title="JSR package"><img alt="JSR" src="https://img.shields.io/jsr/v/@ljh-sh/zhhz?logo=deno&amp;logoColor=white"></a>
   <a href="https://github.com/ljh-sh/zhhz/blob/main/LICENSE" title="Apache 2.0"><img alt="License" src="https://img.shields.io/badge/license-Apache_2.0-blue.svg"></a>
   <a href="https://github.com/ljh-sh/zhhz/actions/workflows/wasm.yml" title="CI"><img alt="Build status" src="https://img.shields.io/github/actions/workflow-status/ljh-sh/zhhz/wasm.yml?branch=main&amp;logo=github-actions&amp;logoColor=white"></a>
 </div>
@@ -54,14 +55,20 @@ print(zhhz.detect("汉字计算机软件"))  # Detection(region='cn-s', confiden
 
 ## Four distribution channels, one engine
 
-| Channel | Audience | Install | Perf on 5 MiB corpus |
-|---|---|---|---:|
-| **CLI** | Shell, AI agents, scripts | `cargo install zhhz` / [binary](https://github.com/ljh-sh/zhhz/releases) | **88 MB/s** (s2t, native) |
-| **Rust library** | Rust consumers | `[dependencies] zhhz = "0.7"` | same as CLI |
-| **npm** | Node.js / browsers | `npm install zhhz` | 63 MB/s (s2t, WASM) |
-| **Python** | Python consumers | `pip install zhhz` | same as Rust (native in-process) |
+| Channel | Audience | Install | s2t | t2s |
+|---|---|---|---:|---:|
+| **CLI** (native) | Shell, AI agents, scripts | `cargo install zhhz` | **88 MB/s** | 88 MB/s |
+| **Rust library** | Rust consumers | `[dependencies] zhhz = "0.7"` | same as CLI | same as CLI |
+| **npm** (WASM) | Node.js / browsers | `npm install zhhz` | 63 MB/s | **104 MB/s** |
+| **Deno** (WASM) | Deno users | `npm:zhhz@…` (live) | 58 MB/s | **108 MB/s** |
+| **Python** (PyO3) | Python consumers | `pip install zhhz` | same as Rust | same as Rust |
 
-All four share the same Rust conversion core. Conversion output is byte-identical to the OpenCC reference CLI on all 538 supported-config cases.
+Two numbers worth highlighting:
+
+- **`t2s` via npm/Deno beats the native CLI** (~120-125 %): the WASM blob loads the OpenCC dictionaries once and runs in-process — no fork + exec + pipe overhead.
+- **Deno and Node.js are within 5-10 % of each other** for the same WASM blob — V8 is V8, whether it's running in Node or Deno.
+
+All five share the same Rust conversion core. Conversion output is byte-identical to the OpenCC reference CLI on all 538 supported-config cases. Full perf table: [Benchmarks]({{ '/benchmarks' | relative_url }}).
 
 ## Designed for AI agents
 
@@ -89,5 +96,7 @@ All four share the same Rust conversion core. Conversion output is byte-identica
 - [Rust library]({{ '/library' | relative_url }}) — embedding zhhz in a Rust project
 - [Node.js / npm]({{ '/npm' | relative_url }}) — `npm install zhhz`, full API reference
 - [Python integration]({{ '/python' | relative_url }}) — `pip install zhhz`, threading, async-wrap recipe
+- [Deno integration]({{ '/deno' | relative_url }}) — `npm:zhhz@…` (live) + `jsr:@ljh-sh/zhhz`
+- [Benchmarks]({{ '/benchmarks' | relative_url }}) — 4-channel perf table (CLI / npm / Deno / native)
 - [Why zhhz]({{ '/why' | relative_url }}) — design goals, scope, what zhhz is NOT
 - [FAQ]({{ '/faq' | relative_url }}) — common questions
