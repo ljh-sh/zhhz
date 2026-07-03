@@ -7,7 +7,7 @@
 
 > Self-contained Simplified/Traditional Chinese converter — a pure-Rust, data-embedded reimplementation of [OpenCC](https://github.com/BYVoid/OpenCC).
 
-`zhhz` converts between Simplified and Traditional Chinese (plus Taiwan, Hong Kong, and Japanese-shinjitai variants) using the OpenCC dictionaries, and detects the script variant of Chinese text. **All dictionaries are embedded in the binary at compile time** — one ~1.7 MB static binary, no runtime download, no separate data directory.
+`zhhz` converts between Simplified and Traditional Chinese (plus Taiwan, Hong Kong, and Japanese-shinjitai variants) using the OpenCC dictionaries, and detects the script variant of Chinese text. **All dictionaries are embedded in the binary at compile time** — one ~1.86 MB static binary (or 588 KB xz-compressed) with no runtime download and no separate data directory.
 
 The name is a palindrome: **zh** hanzi, and **z**huan **h**uan **h**an **z**i (转换汉字, "convert Chinese characters").
 
