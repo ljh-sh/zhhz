@@ -65,8 +65,12 @@ jobs:
           # docs/demo/ is committed so Jekyll serves it directly; we
           # refresh it here so the live demo never drifts from the
           # published npm artifact.
+          #
+          # Note: the web target does NOT produce a separate zhhz_bg.js —
+          # the JS glue is inlined into zhhz.js. Only zhhz.js + zhhz_bg.wasm
+          # exist after the web build.
           mkdir -p docs/demo
-          cp pkg/zhhz.js pkg/zhhz_bg.js pkg/zhhz_bg.wasm docs/demo/
+          cp pkg/zhhz.js pkg/zhhz_bg.wasm docs/demo/
         # produces pkg/ again (overwrites) — kept as a final sanity check that
         # the web build also succeeds (different JS glue generation than nodejs).
 
