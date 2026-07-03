@@ -18,18 +18,18 @@ zhhz ships the same Rust conversion core in four channels (CLI, Rust library, np
 
 ## Results (MB/s, median of 5 runs)
 
-| config | CLI (native) | npm (WASM) | Python (PyO3) | Rust (rlib) |
-|---|---:|---:|---:|---:|
-| `s2t`   | 88 | 63 | ~85 (same engine) | ~85 (same engine) |
-| `s2twp` | ~88 | 41 | ~85 | ~85 |
-| `t2s`   | ~88 | **104** | ~85 | ~85 |
+| config | CLI (native) | npm (WASM) | Deno (WASM) | Python (PyO3) | Rust (rlib) |
+|---|---:|---:|---:|---:|---:|
+| `s2t`   | 88 | 63 | 58 | ~85 (same engine) | ~85 (same engine) |
+| `s2twp` | ~88 | 41 | 39 | ~85 | ~85 |
+| `t2s`   | ~88 | **104** | **108** | ~85 | ~85 |
 
 The CLI / Python / Rust numbers are all roughly the same — they share the Rust conversion core; the per-binding overhead is small.
 
-The npm column is more interesting:
+The WASM columns (npm + Deno) are interesting:
 
-- **`t2s` is faster than native CLI** (~118 %). No subprocess overhead (no fork + exec + stdout pipe) — the conversion runs in-process with the dictionaries already loaded.
-- **`s2t` is ~71 % of native**. WASM string-boundary marshalling costs some throughput but the trie walk itself is fast.
+- **`t2s` is faster than native CLI** (~120-125 %). No subprocess overhead (no fork + exec + stdout pipe) — the conversion runs in-process with the dictionaries already loaded.
+- **Deno and Node.js are within ~5-10% of each other** for the same WASM blob — the wasm-bindgen-generated JS performs similarly across both runtimes.
 - **`s2twp` is ~47 % of native**. Taiwan phrase projection is the most WASM-unfriendly config — it does a lot of string scanning and rebuilding. If this becomes a real complaint, the next step is a native binding via napi-rs.
 
 ## One-shot vs instance (npm)

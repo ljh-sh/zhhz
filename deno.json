@@ -1,0 +1,8 @@
+{
+  "name": "@ljh-sh/zhhz",
+  "version": "0.7.9",
+  "exports": "./mod.ts",
+  "imports": {
+    "zhhz": "npm:zhhz@0.7.9"
+  }
+}

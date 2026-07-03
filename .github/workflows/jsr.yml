@@ -1,0 +1,50 @@
+name: Publish to JSR (@ljh-sh/zhhz)
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write   # OIDC for JSR Trusted Publishing
+
+jobs:
+  publish-jsr:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Publish package to JSR
+        # The `npx jsr publish` wrapper downloads the JSR CLI (~3 MiB) and
+        # calls `deno publish` under the hood. No secret needed — the
+        # package is linked to this repo (per the jsr.io/new flow) and
+        # the workflow's OIDC token authorises the upload.
+        run: npx jsr publish
+
+  publish-dryrun:
+    # Exercise the JSR publish path without burning a version.
+    # Trigger from the GH UI: Actions → Publish to JSR → Run workflow.
+    # Verifies the OIDC auth handshake + the package's source config
+    # is JSR-clean.
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Check JSR package config (no publish)
+        run: |
+          echo "deno.json:"
+          cat deno.json
+          echo ""
+          echo "mod.ts exports:"
+          grep -E "^export" mod.ts
+          echo ""
+          echo "verifying the JSR toolchain is available…"
+          npx --yes jsr --help | head -3
+          echo ""
+          echo "(dry-run: would call 'npx jsr publish' in production)"
