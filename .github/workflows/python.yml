@@ -104,7 +104,10 @@ jobs:
         env:
           MATURIN_PYPI_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
         run: |
-          maturin publish --release --features python \
+          # `maturin publish` is itself a release build — the `--release`
+          # flag is invalid here. (It would be valid for `maturin build`,
+          # but `publish` always builds in release mode internally.)
+          maturin publish --features python \
             --username __token__ \
             --password "$MATURIN_PYPI_TOKEN" \
             --no-strip
