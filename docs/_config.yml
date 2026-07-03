@@ -1,5 +1,13 @@
 title: zhhz
 description: Self-contained Simplified/Traditional Chinese converter — pure-Rust, data-embedded OpenCC reimplementation with CLI, Rust library, npm (WASM) and planned Python bindings.
+# Explicit empty theme: the actions/jekyll-build-pages image ships the
+# `minima` gem which auto-injects its own SCSS (normalize.css,
+# minima.scss) into the build when no `theme` is set, and that
+# SCSS gets prepended to (and dwarfs) our 5 KB custom style.css.
+# Setting `theme:` to an empty value disables the default theme so
+# our custom stylesheet is the only CSS served. (`theme: null` is
+# what Jekyll's docs recommend for "no theme".)
+theme: ~
 baseurl: "/zhhz"
 url: "https://ljh-sh.github.io"
 
