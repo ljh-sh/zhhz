@@ -17,6 +17,11 @@
 name: build-and-release
 
 on:
+  # Auto-run on `v*` tag push so we don't need workflow_dispatch.
+  # The OpenSSF Scorecard looks for a "release / publish" workflow
+  # with this trigger pattern; missing it costs the Packaging score.
+  push:
+    tags: ['v*']
   workflow_dispatch:
     inputs:
       next_version:
