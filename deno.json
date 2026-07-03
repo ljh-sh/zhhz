@@ -1,6 +1,7 @@
 {
   "name": "@ljh-sh/zhhz",
   "version": "0.7.9",
+  "license": "Apache-2.0",
   "exports": "./mod.ts",
   "imports": {
     "zhhz": "npm:zhhz@0.7.9"
