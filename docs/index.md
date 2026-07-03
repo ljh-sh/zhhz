@@ -25,7 +25,7 @@ title: Home
 
 **zhhz** (zh hanzi — 转换汉字, "convert Chinese characters", a palindrome) is a pure-Rust reimplementation of [OpenCC](https://github.com/BYVoid/OpenCC). It converts between Simplified and Traditional Chinese across the same six variants OpenCC supports (Mainland, Taiwan, Hong Kong, Japan old/new), and identifies which variant a piece of text is written in.
 
-All OpenCC dictionaries are embedded at compile time via `include_str!`, so a single ~1.7 MB static binary carries everything it needs — no runtime data fetch, no separate dictionary directory.
+All OpenCC dictionaries are embedded at compile time via `include_str!`, so a single **~1.86 MB static binary** (**588 KB xz-compressed** / 803 KB gzip / 663 KB zstd) carries everything it needs — no runtime data fetch, no separate dictionary directory.
 
 ## At a glance
 

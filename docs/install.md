@@ -28,6 +28,19 @@ sudo mv zhhz-x86_64-unknown-linux-musl/bin/zhhz /usr/local/bin/
 
 The musl build is fully static and works on any Linux amd64. For macOS / arm64 / Windows, see the [release page](https://github.com/ljh-sh/zhhz/releases/latest) for the matching artifact.
 
+### Binary size
+
+The release tarball contains a single ~1.86 MB static binary (xz-compressed, the tarball is ~600 KB). Compression ratios for the binary alone:
+
+| format | size | download impact |
+|---|---:|---|
+| uncompressed (musl x86_64) | ~1.86 MB | n/a |
+| xz -9 (the release tarball) | ~588 KB | smallest |
+| gzip -9 | ~803 KB | universal (no xz on Windows by default) |
+| zstd -19 | ~663 KB | fast decompression |
+
+The OpenCC dictionaries themselves are ~1.3 MiB of UTF-8 text, embedded into the binary via `include_str!`.
+
 ## Node.js / npm
 
 ```sh

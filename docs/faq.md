@@ -24,7 +24,8 @@ Three reasons: (1) memory safety by construction (no `unsafe` in the conversion 
 
 | Channel | Size |
 |---|---|
-| Static CLI binary (musl, ~1.7 MB) | One file, no dependencies. |
+| Static CLI binary (musl, ~1.86 MB) | One file, no dependencies. |
+| Compressed CLI binary | ~588 KB xz / ~803 KB gzip / ~663 KB zstd (binary embeds ~1.3 MiB of OpenCC dictionaries). |
 | npm package tarball | ~616 kB compressed, ~1.5 MB unpacked. |
 | Rust library, debug build | TBD per release; small enough to ignore. |
 
