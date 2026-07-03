@@ -9,6 +9,7 @@ cargo-fuzz = true
 
 [dependencies]
 zhhz = { path = ".." }
+libfuzzer-sys = "0.4"
 
 [[bin]]
 name = "fmm_segment"

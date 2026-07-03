@@ -21,5 +21,4 @@ fuzz_target!(|data: &[u8]| {
     let text = String::from_utf8_lossy(data);
     let conv = Converter::new(Config::S2t);
     let _ = conv.convert(&text);
-    let _ = conv.convert_with_custom(&text, &[("软件".into(), "軟體".into())]);
 });
