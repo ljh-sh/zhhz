@@ -49,7 +49,7 @@ memchr = "2.8.2"
 # Building this needs Python 3.9+ headers on the build machine; maturin
 # handles cross-platform wheel builds (manylinux / musllinux / macOS /
 # Windows) in CI.
-pyo3 = { version = "0.21", features = ["extension-module"], optional = true }
+pyo3 = { version = "0.29", features = ["extension-module"], optional = true }
 
 [features]
 # Build the WebAssembly bindings (used by `cargo build --target

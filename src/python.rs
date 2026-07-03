@@ -30,7 +30,12 @@ use crate::engine::{Config as EngineConfig, Converter as EngineConverter, Region
 
 #[pyclass(name = "Converter")]
 struct PyConverter {
-    inner: EngineConverter,
+    // EngineConverter contains interior-mutability scratch buffers
+    // (RefCell<Vec<u8>>) which are !Sync. pyo3 ≥ 0.29 requires
+    // #[pyclass] types to be Send + Sync, so we wrap in a Mutex
+    // for the Python path. The Rust library / CLI path uses
+    // EngineConverter directly without the Mutex.
+    inner: std::sync::Mutex<EngineConverter>,
     config_name: String,
 }
 
@@ -38,10 +43,9 @@ struct PyConverter {
 impl PyConverter {
     #[new]
     fn new(config: &str) -> PyResult<Self> {
-        let cfg = EngineConfig::parse(config)
-            .map_err(|e| PyValueError::new_err(e))?;
+        let cfg = EngineConfig::parse(config).map_err(|e| PyValueError::new_err(e))?;
         Ok(PyConverter {
-            inner: EngineConverter::new(cfg),
+            inner: std::sync::Mutex::new(EngineConverter::new(cfg)),
             config_name: config.to_string(),
         })
     }
@@ -52,7 +56,7 @@ impl PyConverter {
         let t = EngineRegion::parse(to).map_err(PyValueError::new_err)?;
         let cfg = crate::engine::region_pair_config(f, t).map_err(PyValueError::new_err)?;
         Ok(PyConverter {
-            inner: EngineConverter::new(cfg),
+            inner: std::sync::Mutex::new(EngineConverter::new(cfg)),
             config_name: cfg.name().to_string(),
         })
     }
@@ -65,7 +69,7 @@ impl PyConverter {
 
     /// Convert `text`. Pure (no I/O, no allocations beyond the result).
     fn convert(&self, text: &str) -> String {
-        self.inner.convert(text)
+        self.inner.lock().unwrap().convert(text)
     }
 
     /// Convert `text` with custom words injected at the highest priority.
@@ -74,6 +78,7 @@ impl PyConverter {
         let pairs = parse_entries(entries)?;
         let cfg = EngineConfig::parse(&self.config_name)
             .expect("config_name was validated at construction");
+        let mut g = self.inner.lock().unwrap();
         Ok(EngineConverter::with_custom(cfg, &pairs).convert(text))
     }
 
@@ -83,7 +88,7 @@ impl PyConverter {
         let cfg = EngineConfig::parse(&self.config_name)
             .expect("config_name was validated at construction");
         Ok(PyConverter {
-            inner: EngineConverter::with_custom(cfg, &pairs),
+            inner: std::sync::Mutex::new(EngineConverter::with_custom(cfg, &pairs)),
             config_name: self.config_name.clone(),
         })
     }
@@ -110,7 +115,10 @@ impl PyDetection {
         self.confidence
     }
     fn __repr__(&self) -> String {
-        format!("<zhhz.Detection region={} confidence={}>", self.region, self.confidence)
+        format!(
+            "<zhhz.Detection region={} confidence={}>",
+            self.region, self.confidence
+        )
     }
 }
 
@@ -137,14 +145,20 @@ fn detect_text(py: Python<'_>, text: &str) -> PyResult<Py<PyAny>> {
 /// All 16 built-in OpenCC config names in canonical order.
 #[pyfunction]
 fn configs() -> Vec<String> {
-    EngineConfig::ALL.iter().map(|c| c.name().to_string()).collect()
+    EngineConfig::ALL
+        .iter()
+        .map(|c| c.name().to_string())
+        .collect()
 }
 
 /// All 6 region codes in canonical order (`cn-s`, `cn-t`, `cn-tw`,
 /// `cn-hk`, `jp-n`, `jp-t`).
 #[pyfunction]
 fn locales() -> Vec<String> {
-    EngineRegion::ALL.iter().map(|r| r.code().to_string()).collect()
+    EngineRegion::ALL
+        .iter()
+        .map(|r| r.code().to_string())
+        .collect()
 }
 
 /// Convert `text` using one of the 16 built-in OpenCC configs.
@@ -158,18 +172,20 @@ fn convert(text: &str, config: &str) -> PyResult<String> {
 #[pyfunction]
 fn convert_region(text: &str, from: &str, to: &str) -> PyResult<String> {
     let c = PyConverter::for_region(from, to)?;
-    Ok(c.inner.convert(text))
+    // Scope the MutexGuard so it drops before `c` does (pyo3 0.29
+    // borrow checker is stricter about temporary borrows).
+    let out = {
+        let g = c.inner.lock().unwrap();
+        g.convert(text)
+    };
+    Ok(out)
 }
 
 /// Convert with custom words, one-shot. Same `entries` shapes as
 /// `Converter.convert_with_custom`.
 #[pyfunction]
 #[pyo3(signature = (text, config, entries))]
-fn convert_with_custom(
-    text: &str,
-    config: &str,
-    entries: &Bound<'_, PyAny>,
-) -> PyResult<String> {
+fn convert_with_custom(text: &str, config: &str, entries: &Bound<'_, PyAny>) -> PyResult<String> {
     let cfg = EngineConfig::parse(config).map_err(PyValueError::new_err)?;
     let pairs = parse_entries(entries)?;
     Ok(EngineConverter::with_custom(cfg, &pairs).convert(text))
@@ -182,16 +198,16 @@ fn convert_with_custom(
 /// Accept list-of-pairs / dict / DictLike-string; return Vec<(String, String)>.
 fn parse_entries(entries: &Bound<'_, PyAny>) -> PyResult<Vec<(String, String)>> {
     // Dict[str, str]
-    if let Ok(d) = entries.downcast::<PyDict>() {
+    if let Ok(d) = entries.cast::<PyDict>() {
         let mut out = Vec::with_capacity(d.len());
         for (k, v) in d.iter() {
             let key = k
-                .downcast::<PyString>()
+                .cast::<PyString>()
                 .map_err(|_| PyValueError::new_err("dict keys must be strings"))?
                 .to_str()?
                 .to_string();
             let value = v
-                .downcast::<PyString>()
+                .cast::<PyString>()
                 .map_err(|_| PyValueError::new_err("dict values must be strings"))?
                 .to_str()?
                 .to_string();
@@ -204,7 +220,7 @@ fn parse_entries(entries: &Bound<'_, PyAny>) -> PyResult<Vec<(String, String)>> 
     }
 
     // str  —  "key value|key value"
-    if let Ok(s) = entries.downcast::<PyString>() {
+    if let Ok(s) = entries.cast::<PyString>() {
         let s = s.to_str()?;
         let mut out = Vec::new();
         for (i, raw) in s.split('|').enumerate() {
@@ -220,12 +236,17 @@ fn parse_entries(entries: &Bound<'_, PyAny>) -> PyResult<Vec<(String, String)>> 
             })?;
             let key = key.trim();
             if key.is_empty() {
-                return Err(PyValueError::new_err(format!("dict entry {}: empty key", i)));
+                return Err(PyValueError::new_err(format!(
+                    "dict entry {}: empty key",
+                    i
+                )));
             }
             out.push((key.to_string(), value.trim().to_string()));
         }
         if out.is_empty() {
-            return Err(PyValueError::new_err("custom dict string parsed to zero entries"));
+            return Err(PyValueError::new_err(
+                "custom dict string parsed to zero entries",
+            ));
         }
         return Ok(out);
     }
@@ -245,12 +266,10 @@ fn parse_entries(entries: &Bound<'_, PyAny>) -> PyResult<Vec<(String, String)>> 
     ))
 }
 
-fn parse_pair_seq<'py>(
-    seq: &Bound<'py, PyAny>,
-) -> PyResult<Vec<(String, String)>> {
+fn parse_pair_seq<'py>(seq: &Bound<'py, PyAny>) -> PyResult<Vec<(String, String)>> {
     let mut out = Vec::new();
     let mut i = 0;
-    let mut iter = seq.iter()?;
+    let mut iter = seq.try_iter()?;
     while let Some(item) = iter.next() {
         let item = item?;
         out.push(parse_pair(&item, i)?);
@@ -262,12 +281,10 @@ fn parse_pair_seq<'py>(
     Ok(out)
 }
 
-fn parse_pair_iter<'py>(
-    iter_obj: &Bound<'py, PyAny>,
-) -> PyResult<Vec<(String, String)>> {
+fn parse_pair_iter<'py>(iter_obj: &Bound<'py, PyAny>) -> PyResult<Vec<(String, String)>> {
     let mut out = Vec::new();
     let mut i = 0;
-    let mut iter = iter_obj.iter()?;
+    let mut iter = iter_obj.try_iter()?;
     while let Some(item) = iter.next() {
         let item = item?;
         out.push(parse_pair(&item, i)?);
@@ -280,7 +297,7 @@ fn parse_pair_iter<'py>(
 }
 
 fn parse_pair(item: &Bound<'_, PyAny>, i: usize) -> PyResult<(String, String)> {
-    if let Ok(t) = item.downcast::<PyTuple>() {
+    if let Ok(t) = item.cast::<PyTuple>() {
         if t.len() != 2 {
             return Err(PyValueError::new_err(format!(
                 "entries[{}] must be a 2-element [key, value]",
@@ -290,11 +307,14 @@ fn parse_pair(item: &Bound<'_, PyAny>, i: usize) -> PyResult<(String, String)> {
         let key = t.get_item(0)?.extract::<String>()?;
         let value = t.get_item(1)?.extract::<String>()?;
         if key.is_empty() {
-            return Err(PyValueError::new_err(format!("entries[{}] has an empty key", i)));
+            return Err(PyValueError::new_err(format!(
+                "entries[{}] has an empty key",
+                i
+            )));
         }
         return Ok((key, value));
     }
-    if let Ok(l) = item.downcast::<PyList>() {
+    if let Ok(l) = item.cast::<PyList>() {
         if l.len() != 2 {
             return Err(PyValueError::new_err(format!(
                 "entries[{}] must be a 2-element [key, value]",
@@ -304,7 +324,10 @@ fn parse_pair(item: &Bound<'_, PyAny>, i: usize) -> PyResult<(String, String)> {
         let key = l.get_item(0)?.extract::<String>()?;
         let value = l.get_item(1)?.extract::<String>()?;
         if key.is_empty() {
-            return Err(PyValueError::new_err(format!("entries[{}] has an empty key", i)));
+            return Err(PyValueError::new_err(format!(
+                "entries[{}] has an empty key",
+                i
+            )));
         }
         return Ok((key, value));
     }
