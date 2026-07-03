@@ -83,7 +83,7 @@ All five share the same Rust conversion core. Conversion output is byte-identica
 ## What makes zhhz different
 
 - **Embedded dictionaries**: no `data/` directory, no runtime fetch, no marisa-trie to load. Build with `include_str!` and ship one binary.
-- **One engine, four channels**: the same Rust core produces the CLI binary, the npm WebAssembly artifact, the Python `pip install` wheel, and the Rust library. No behavioral drift.
+- **One engine, five channels**: the same Rust core produces the CLI binary, the Rust library, the npm WebAssembly artifact, the Python `pip install` wheel, and the Deno JSR package. No behavioral drift.
 - **Strict superset of `opencc-js`**: same npm install path, same `Converter({from,to})` factory, same custom-words API — plus script-variant detection, introspection (`listConfigs` / `listLocales`), and semantic region flags (`Converter.forRegion("cn-s", "cn-tw")`). See [npm API]({{ '/npm' | relative_url }}) for the full comparison.
 - **Memory-safe by construction** — pure Rust, no `unsafe` in the conversion core.
 - **APLv2-licensed**, vendored dictionaries from upstream OpenCC.
@@ -97,6 +97,6 @@ All five share the same Rust conversion core. Conversion output is byte-identica
 - [Node.js / npm]({{ '/npm' | relative_url }}) — `npm install zhhz`, full API reference
 - [Python integration]({{ '/python' | relative_url }}) — `pip install zhhz`, threading, async-wrap recipe
 - [Deno integration]({{ '/deno' | relative_url }}) — `npm:zhhz@…` (live) + `jsr:@ljh-sh/zhhz`
-- [Benchmarks]({{ '/benchmarks' | relative_url }}) — 4-channel perf table (CLI / npm / Deno / native)
+- [Benchmarks]({{ '/benchmarks' | relative_url }}) — 5-channel perf table (CLI / npm / Deno / native / Python)
 - [Why zhhz]({{ '/why' | relative_url }}) — design goals, scope, what zhhz is NOT
 - [FAQ]({{ '/faq' | relative_url }}) — common questions
