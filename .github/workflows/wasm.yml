@@ -113,8 +113,13 @@ jobs:
         # an unrelated package before this fix; the dry-run caught it.)
         run: |
           # Debug: confirm the token resolves to a real npm identity before
-          # we attempt to publish. Surfaces revoked / wrong-scope tokens
-          # as a clear `whoami failed` rather than a generic ENEEDAUTH.
+          # publishing. NODE_AUTH_TOKEN alone was returning ENEEDAUTH on
+          # the CI runner even with a known-good token, so we also pass it
+          # via `npm config set` (which writes ~/.npmrc — the format npm
+          # actually reads on the publish path).
+          echo "NODE_AUTH_TOKEN length: ${#NODE_AUTH_TOKEN}"
+          echo "NODE_AUTH_TOKEN prefix: ${NODE_AUTH_TOKEN:0:8}"
+          npm config set //registry.npmjs.org/:_authToken "$NODE_AUTH_TOKEN"
           if ! npm whoami; then
             echo "::error::npm whoami failed — NPM_TOKEN is missing, revoked, or wrong-scoped"
             exit 1
