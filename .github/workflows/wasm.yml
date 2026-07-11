@@ -38,7 +38,7 @@ jobs:
         # Pin via WASM_PACK_VERSION so a future wasm-pack release with a
         # different JS glue format can't silently change the published
         # artifact. Bump deliberately.
-        run: curl -fsSL https://raw.githubusercontent.com/rustwasm/wasm-pack/v0.13.0/installer/init.sh | sh
+        run: curl -fsSL https://wasm-bindgen.github.io/wasm-pack/installer/init.sh | sh
         env:
           WASM_PACK_VERSION: v0.13.0
 
@@ -93,7 +93,7 @@ jobs:
           target: wasm32-unknown-unknown
 
       - name: Install wasm-pack (pinned)
-        run: curl -fsSL https://raw.githubusercontent.com/rustwasm/wasm-pack/v0.13.0/installer/init.sh | sh
+        run: curl -fsSL https://wasm-bindgen.github.io/wasm-pack/installer/init.sh | sh
         env:
           WASM_PACK_VERSION: v0.13.0
 
@@ -149,7 +149,7 @@ jobs:
           target: wasm32-unknown-unknown
 
       - name: Install wasm-pack (pinned)
-        run: curl -fsSL https://raw.githubusercontent.com/rustwasm/wasm-pack/v0.13.0/installer/init.sh | sh
+        run: curl -fsSL https://wasm-bindgen.github.io/wasm-pack/installer/init.sh | sh
         env:
           WASM_PACK_VERSION: v0.13.0
 

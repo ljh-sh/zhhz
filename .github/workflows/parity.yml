@@ -83,61 +83,64 @@ jobs:
           path: parity-report.txt
           retention-days: 90
 
+      # The issue-body markdown lives in a separate file so the
+      # YAML parser (and dependabot's rebase diff) sees a clean
+      # multi-line `run:` block instead of an unterminated quoted
+      # string spanning many lines (which broke dependabot parsing).
+      - name: Write parity issue body template
+        run: |
+          cat > /tmp/parity-body.md <<'PARITY_BODY_EOF'
+          Weekly `.github/workflows/parity.yml` run found __DELTAS__ delta lines between zhhz and opencc at the vendored data version.
+
+          This is **not necessarily a bug** — opencc and zhhz make different
+          (but both correct) choices on word-frequency-disambiguation inputs
+          (e.g. 齣/出, 着/著). Each new delta represents a tracking item,
+          not a defect.
+
+          ## Diff report (first 200 lines)
+
+          ```
+          __BODY__
+          ```
+
+          ## Triage
+
+          - If the delta is a known segmentation choice: close with a comment
+            linking the `data/UPSTREAM` commit that introduced it.
+          - If the delta is a real zhhz regression: convert this to a regular
+            bug issue, fix in a PR, and reference here.
+
+          Report artifact: see this run's `parity-report` artifact.
+          PARITY_BODY_EOF
+          sed -i 's/^          //' /tmp/parity-body.md
+
       - name: Open parity-tracking issue on regression
         if: hashFiles('parity-report.txt') != ''
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPORT: ${{ github.workspace }}/parity-report.txt
         run: |
-          # Count non-empty diffs (lines starting with '+' or '-'
-          # but not '+++' / '---' / '+ ' / '- ' headers).
           deltas=$(grep -cE '^[-+][^-+ ]' parity-report.txt || true)
           echo "delta lines: $deltas"
           if [ "$deltas" = "0" ]; then
             echo "No deltas — zhhz output is byte-identical to opencc."
             exit 0
           fi
-          # Threshold for opening an issue: > 5 distinct delta lines
-          # (a small handful is expected; only open for notable
-          # regressions / shifts in the algorithm).
           if [ "$deltas" -lt 5 ]; then
             echo "Minor diffs ($deltas lines) — known algorithmic differences, skipping issue."
             exit 0
           fi
-          # Avoid spamming: search for an existing open parity-tracking
-          # issue and append a comment if found; otherwise create a new
-          # one.
+          body=$(head -200 parity-report.txt)
+          sed -e "s/__DELTAS__/$deltas/g" -e "s/__BODY__/$body/g" /tmp/parity-body.md > /tmp/parity-body-final.md
           existing=$(gh issue list --label "parity-tracking" --state open \
             --json number --jq '.[0].number' 2>/dev/null || echo "")
-          body=$(head -200 parity-report.txt)
           if [ -n "$existing" ] && [ "$existing" != "null" ]; then
-            gh issue comment "$existing" --body "Weekly parity re-run found $deltas delta lines. Latest report (first 200 lines):\n\n\`\`\`\n$body\n\`\`\`"
+            gh issue comment "$existing" --body-file /tmp/parity-body-final.md
             echo "Updated existing issue #$existing"
           else
             gh issue create \
               --title "parity: $deltas delta lines vs opencc @ $(date -u +%Y-%m-%dT%H:%M:%SZ)" \
               --label "parity-tracking" \
-              --body "Weekly \`.github/workflows/parity.yml\` run found **$deltas** delta lines between zhhz and opencc at the vendored data version.
-
-This is **not necessarily a bug** — opencc and zhhz make different
-(but both correct) choices on word-frequency-disambiguation inputs
-(e.g. 齣/出, 着/著). Each new delta represents a tracking item,
-not a defect.
-
-## Diff report (first 200 lines)
-
-\`\`\`
-$body
-\`\`\`
-
-## Triage
-
-- If the delta is a known segmentation choice: close with a comment
-  linking the \`data/UPSTREAM\` commit that introduced it.
-- If the delta is a real zhhz regression: convert this to a regular
-  bug issue, fix in a PR, and reference here.
-
-Report artifact: see this run's \`parity-report\` artifact.
-"
+              --body-file /tmp/parity-body-final.md
             echo "Opened new parity-tracking issue"
           fi
