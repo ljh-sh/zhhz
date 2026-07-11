@@ -43,7 +43,7 @@ struct PyConverter {
 impl PyConverter {
     #[new]
     fn new(config: &str) -> PyResult<Self> {
-        let cfg = EngineConfig::parse(config).map_err(|e| PyValueError::new_err(e))?;
+        let cfg = EngineConfig::parse(config).map_err(PyValueError::new_err)?;
         Ok(PyConverter {
             inner: std::sync::Mutex::new(EngineConverter::new(cfg)),
             config_name: config.to_string(),
@@ -78,7 +78,6 @@ impl PyConverter {
         let pairs = parse_entries(entries)?;
         let cfg = EngineConfig::parse(&self.config_name)
             .expect("config_name was validated at construction");
-        let mut g = self.inner.lock().unwrap();
         Ok(EngineConverter::with_custom(cfg, &pairs).convert(text))
     }
 
@@ -266,14 +265,11 @@ fn parse_entries(entries: &Bound<'_, PyAny>) -> PyResult<Vec<(String, String)>> 
     ))
 }
 
-fn parse_pair_seq<'py>(seq: &Bound<'py, PyAny>) -> PyResult<Vec<(String, String)>> {
+fn parse_pair_seq(seq: &Bound<'_, PyAny>) -> PyResult<Vec<(String, String)>> {
     let mut out = Vec::new();
-    let mut i = 0;
-    let mut iter = seq.try_iter()?;
-    while let Some(item) = iter.next() {
+    for (i, item) in seq.try_iter()?.enumerate() {
         let item = item?;
         out.push(parse_pair(&item, i)?);
-        i += 1;
     }
     if out.is_empty() {
         return Err(PyValueError::new_err("custom entries list is empty"));
@@ -281,14 +277,11 @@ fn parse_pair_seq<'py>(seq: &Bound<'py, PyAny>) -> PyResult<Vec<(String, String)
     Ok(out)
 }
 
-fn parse_pair_iter<'py>(iter_obj: &Bound<'py, PyAny>) -> PyResult<Vec<(String, String)>> {
+fn parse_pair_iter(iter_obj: &Bound<'_, PyAny>) -> PyResult<Vec<(String, String)>> {
     let mut out = Vec::new();
-    let mut i = 0;
-    let mut iter = iter_obj.try_iter()?;
-    while let Some(item) = iter.next() {
+    for (i, item) in iter_obj.try_iter()?.enumerate() {
         let item = item?;
         out.push(parse_pair(&item, i)?);
-        i += 1;
     }
     if out.is_empty() {
         return Err(PyValueError::new_err("custom entries iterator is empty"));
