@@ -33,10 +33,10 @@ OPTIONS:
                              s2hkp hk2sp t2tw tw2t t2hk hk2t t2jp jp2t
         --from <REGION>     Source script region (alternative to --config).
         --to   <REGION>     Target script region (requires --from).
-                             Regions: cn-s cn-t cn-tw cn-hk jp-t jp-n
+        --target <REGION>   With --auto: target region to convert to. Default: cn-s.
         --auto              Detect each input's script variant and convert
-                             it to Simplified (cn-s). For Japanese input,
-                             runs a 2-stage pipeline (jp2t then t2s).
+                             it. Default target is cn-s; change with --target.
+                             Regions: cn-s cn-t cn-tw cn-hk jp-t jp-n.
         --dict <FILE>       Custom dictionary (TSV: key<TAB>value), highest
                              priority. May be repeated. '#' lines are ignored.
         --ngram <FILE>      Path to an ARPA n-gram model for multi-value
@@ -66,6 +66,7 @@ EXAMPLES:
     echo '汉字' | zhhz --from cn-s --to cn-t      # 漢字
     echo '鼠标' | zhhz --from cn-s --to cn-tw     # 滑鼠
     echo '万与两' | zhhz --auto                   # detect -> Simplified
+    echo '我買了滑鼠' | zhhz --auto --target cn-t # auto-detect tw -> t2s
     zhhz -c s2t --dict mywords.txt input.txt      # legacy --config form
     cat urls.txt | zhhz --files-from -            # chardet-style batch
     zhhz --trigram --ngram 3gram.arpa input.txt  # 齣/出 disambig
@@ -76,6 +77,9 @@ pub struct Cli {
     pub config: Option<String>,
     pub from: Option<String>,
     pub to: Option<String>,
+    /// With `--auto`: target region to convert to. Defaults to cn-s.
+    /// Ignored unless `--auto` is set; conflicts with `--to`.
+    pub auto_target: Option<String>,
     pub dicts: Vec<PathBuf>,
     pub in_place: bool,
     pub list: bool,
@@ -113,6 +117,7 @@ fn parse_args(argv: Vec<String>) -> Result<Action> {
         list: false,
         files: Vec::new(),
         auto: false,
+        auto_target: None,
         files_from: None,
         null: false,
         ngram: None,
@@ -141,6 +146,7 @@ fn parse_args(argv: Vec<String>) -> Result<Action> {
             }
             "--from" => cli.from = Some(take_value(&mut args, "--from")?),
             "--to" => cli.to = Some(take_value(&mut args, "--to")?),
+            "--target" => cli.auto_target = Some(take_value(&mut args, "--target")?),
             "--dict" => {
                 cli.dicts
                     .push(PathBuf::from(take_value(&mut args, "--dict")?));
@@ -158,6 +164,7 @@ fn parse_args(argv: Vec<String>) -> Result<Action> {
                     "--config" => cli.config = Some(take_owned_value(flag, val)?),
                     "--from" => cli.from = Some(take_owned_value(flag, val)?),
                     "--to" => cli.to = Some(take_owned_value(flag, val)?),
+                    "--target" => cli.auto_target = Some(take_owned_value(flag, val)?),
                     "--dict" => cli.dicts.push(PathBuf::from(take_owned_value(flag, val)?)),
                     "--ngram" => {
                         cli.ngram = Some(PathBuf::from(take_owned_value(flag, val)?));
@@ -180,6 +187,14 @@ fn parse_args(argv: Vec<String>) -> Result<Action> {
     }
     if (cli.from.is_some()) != (cli.to.is_some()) {
         return Err(anyhow::anyhow!("--from and --to must be used together"));
+    }
+    if cli.auto_target.is_some() && !cli.auto {
+        return Err(anyhow::anyhow!("--target requires --auto"));
+    }
+    if cli.auto_target.is_some() && cli.to.is_some() {
+        return Err(anyhow::anyhow!(
+            "--target conflicts with --to (use --target with --auto only)"
+        ));
     }
     if cli.config.is_some() && (cli.from.is_some() || cli.to.is_some()) {
         return Err(anyhow::anyhow!(
@@ -406,18 +421,31 @@ fn run_cli(cli: Cli) -> Result<()> {
     let inputs = resolve_convert_inputs(&cli)?;
 
     if cli.auto {
-        // --auto: detect each input's script variant and convert it to
-        // Simplified (cn-s). Each region's direct-to-cn-s config is used;
-        // for jp-n (shinjitai) a 2-stage pipeline jp2t → t2s is required.
+        // --auto: detect each input's script variant and convert to the
+        // requested target (default cn-s, configurable via --target).
+        //
+        // Each region's direct-to-cn-s config is used; for jp-n we always
+        // go jp2t first and then chain. When the source already matches
+        // the target, pass through unchanged.
+        let target = cli
+            .auto_target
+            .as_deref()
+            .map(Region::parse)
+            .transpose()
+            .map_err(|e| anyhow::anyhow!("invalid --target: {e}"))?
+            .unwrap_or(Region::CnS);
+
         let mut t2s = Converter::with_custom(Config::T2s, &custom);
         let mut tw2sp = Converter::with_custom(Config::Tw2sp, &custom);
         let mut hk2sp = Converter::with_custom(Config::Hk2sp, &custom);
         let mut jp2t = Converter::with_custom(Config::Jp2t, &custom);
+        let mut s2t = Converter::with_custom(Config::S2t, &custom); // only used if target=cn-t from cn-s
         if let Some((model, mode)) = &ngram {
             t2s = t2s.with_ngram(clone_ngram(model), *mode);
             tw2sp = tw2sp.with_ngram(clone_ngram(model), *mode);
             hk2sp = hk2sp.with_ngram(clone_ngram(model), *mode);
             jp2t = jp2t.with_ngram(clone_ngram(model), *mode);
+            s2t = s2t.with_ngram(clone_ngram(model), *mode);
         }
         for (path, mut content) in inputs {
             if path == std::path::Path::new("-") && content.is_empty() {
@@ -427,14 +455,36 @@ fn run_cli(cli: Cli) -> Result<()> {
                     .context("failed to read stdin")?;
             }
             let det = crate::detect::detect_text(&content);
-            let out = match det.map(|d| d.region) {
-                Some(Region::CnS) => content,
-                Some(Region::CnT) => t2s.convert(&content),
-                Some(Region::CnTw) => tw2sp.convert(&content),
-                Some(Region::CnHk) => hk2sp.convert(&content),
-                Some(Region::JpN) => t2s.convert(&jp2t.convert(&content)),
-                Some(Region::JpT) => t2s.convert(&content),
-                None => content, // unknown: pass through
+            let from = det.map(|d| d.region);
+            let out = match (from, target) {
+                // Same-region passthrough.
+                (Some(r), t) if r == t => content.clone(),
+                // → cn-s paths (the original --auto behavior).
+                (Some(Region::CnS), Region::CnS) => content,
+                (Some(Region::CnT), Region::CnS) => t2s.convert(&content),
+                (Some(Region::CnTw), Region::CnS) => tw2sp.convert(&content),
+                (Some(Region::CnHk), Region::CnS) => hk2sp.convert(&content),
+                (Some(Region::JpT), Region::CnS) => t2s.convert(&content),
+                (Some(Region::JpN), Region::CnS) => t2s.convert(&jp2t.convert(&content)),
+                // → cn-t paths. cn-s → cn-t uses s2t. JP shinjitai uses
+                // jp2t. Other regional sources (cn-tw, cn-hk) require an
+                // explicit --config combo (TW/HK phrase dicts go to cn-s,
+                // not cn-t directly).
+                (Some(Region::CnS), Region::CnT) => s2t.convert(&content),
+                (Some(Region::CnT), Region::CnT) => content,
+                (Some(Region::JpN), Region::CnT) => jp2t.convert(&content),
+                (Some(Region::JpT), Region::CnT) => content,
+                // Unsupported (from, target) — recommend explicit combo.
+                (Some(from), target) => {
+                    return Err(anyhow::anyhow!(
+                        "--auto does not support converting {:?} to {:?}; \
+                         use --config + --from/--to for that combination",
+                        from,
+                        target
+                    ));
+                }
+                // unknown region: pass through unchanged.
+                (None, _) => content,
             };
             write_one(&path, &out, &cli)?;
         }
