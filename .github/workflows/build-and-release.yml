@@ -131,6 +131,7 @@ jobs:
         run: pip install cargo-zigbuild==0.19.1
 
       - name: Build
+        shell: bash
         run: |
           SYSROOT="$(rustc --print sysroot)"
           export RUSTFLAGS="--remap-path-prefix=${{ github.workspace }}=. --remap-path-prefix=$SYSROOT=/rust --remap-path-prefix=$HOME/.cargo=/cargo"
