@@ -109,7 +109,7 @@ pub enum ModeFlag {
 }
 
 enum Action {
-    Run(Cli),
+    Run(Box<Cli>),
     Help,
     Version,
 }
@@ -234,7 +234,7 @@ fn parse_args(argv: Vec<String>) -> Result<Action> {
     if cli.mode_flag == ModeFlag::Default && cli.ngram.is_some() {
         cli.mode_flag = ModeFlag::Trigram;
     }
-    Ok(Action::Run(cli))
+    Ok(Action::Run(Box::new(cli)))
 }
 
 fn take_value<I: Iterator<Item = String>>(
@@ -282,7 +282,7 @@ pub fn run() -> Result<()> {
             println!("zhhz {}", env!("CARGO_PKG_VERSION"));
             Ok(())
         }
-        Action::Run(cli) => run_cli(cli),
+        Action::Run(cli) => run_cli(*cli),
     }
 }
 
