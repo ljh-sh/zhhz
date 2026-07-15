@@ -1,12 +1,7 @@
-use zhhz::{Config, Converter, NgramModel, NgramMode};
+use zhhz::{Config, Converter, NgramMode, NgramModel};
 
 fn main() {
-    let cases = vec![
-        "这出戏",
-        "那出戏",
-        "这出戏真好看",
-        "那出戏好看",
-    ];
+    let cases = vec!["这出戏", "那出戏", "这出戏真好看", "那出戏好看"];
 
     println!("=== A. pure fast ===");
     let c_fast = Converter::new(Config::S2t);

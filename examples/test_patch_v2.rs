@@ -1,11 +1,11 @@
 // 4 个真正差异 case, 用 with_custom patch 测试 phrase dict 等价
-use zhhz::{Config, Converter, NgramModel, NgramMode};
+use zhhz::{Config, Converter, NgramMode, NgramModel};
 
 fn main() {
     // 穷举出的 4 个真正差异短语
     let cases = vec![
-        ("你干了", "你幹了 / 你乾了", "你干了", "你幹了"),  // verb "do"
-        ("你干着", "你幹着 / 你乾着", "你干着", "你幹着"),  // doing
+        ("你干了", "你幹了 / 你乾了", "你干了", "你幹了"), // verb "do"
+        ("你干着", "你幹着 / 你乾着", "你干着", "你幹着"), // doing
         ("这出戏", "這出戲 / 這齣戲", "这出戏", "這齣戲"),
         ("那出戏", "那出戲 / 那齣戲", "那出戏", "那齣戲"),
         ("我干了", "我幹了 / 我乾了", "我干了", "我幹了"),
