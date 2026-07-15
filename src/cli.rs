@@ -1,10 +1,11 @@
 //! Command-line interface for `zhhz`.
 //!
 //! The argument parser is hand-rolled (no clap) to keep the dependency tree
-//! tiny and the static binary small. Supported form:
+//! tiny and the static binary small. Supported forms:
 //!
 //! ```text
 //! zhhz [--config <CONFIG>] [--from <R> --to <R>] [--dict <FILE>...] [--in-place] [--list] [FILE...]
+//! zhhz info <CONFIG>
 //! zhhz --help | --version
 //! ```
 
@@ -22,6 +23,7 @@ zhhz — self-contained Simplified/Traditional Chinese converter
 
 USAGE:
     zhhz [--config <CONFIG> | --from <R> --to <R>] [--dict <FILE>...] [--in-place] [FILE...]
+    zhhz info <CONFIG>
     zhhz --list
     zhhz < input.txt > output.txt
 
@@ -63,6 +65,8 @@ OPTIONS:
     -V, --version           Show version.
 
 EXAMPLES:
+    zhhz info s2t                                # show s2t config details
+    zhhz info tw2sp                              # show tw2sp config details
     echo '汉字' | zhhz --from cn-s --to cn-t      # 漢字
     echo '鼠标' | zhhz --from cn-s --to cn-tw     # 滑鼠
     echo '万与两' | zhhz --auto                   # detect -> Simplified
@@ -83,6 +87,9 @@ pub struct Cli {
     pub dicts: Vec<PathBuf>,
     pub in_place: bool,
     pub list: bool,
+    /// `info <CONFIG>` subcommand: when Some, run the introspection
+    /// printer and exit without converting anything.
+    pub info: Option<String>,
     pub files: Vec<PathBuf>,
     pub auto: bool,
     pub files_from: Option<PathBuf>,
@@ -118,6 +125,7 @@ fn parse_args(argv: Vec<String>) -> Result<Action> {
         files: Vec::new(),
         auto: false,
         auto_target: None,
+        info: None,
         files_from: None,
         null: false,
         ngram: None,
@@ -125,6 +133,16 @@ fn parse_args(argv: Vec<String>) -> Result<Action> {
     };
     let mut args = argv.into_iter().skip(1).peekable();
     while let Some(arg) = args.next() {
+        // `info` is a positional subcommand: `zhhz info <CONFIG>`. It must
+        // be the first non-flag token. We handle it before any flag parsing
+        // so the config name can't be confused with a file path.
+        if cli.info.is_none() && arg == "info" && !arg.starts_with('-') {
+            let name = args
+                .next()
+                .ok_or_else(|| anyhow::anyhow!("zhhz info: missing config name"))?;
+            cli.info = Some(name);
+            continue;
+        }
         match arg.as_str() {
             "-h" | "--help" => return Ok(Action::Help),
             "-V" | "--version" => return Ok(Action::Version),
@@ -410,6 +428,10 @@ fn run_cli(cli: Cli) -> Result<()> {
         list_regions_and_configs();
         return Ok(());
     }
+    if let Some(name) = &cli.info {
+        print_config_info(name)?;
+        return Ok(());
+    }
 
     let custom = load_custom_dicts(&cli.dicts)?;
     let ngram = load_ngram(&cli)?;
@@ -574,5 +596,68 @@ fn list_regions_and_configs() {
         if let Ok(cfg) = region_pair_config(Region::parse(f).unwrap(), Region::parse(t).unwrap()) {
             println!("{:<6}  {:<6}  {}", f, t, cfg.name());
         }
+    }
+}
+
+/// Print introspection for a single OpenCC config: name, description,
+/// source/target region, segmentation group, and a tiny before/after example.
+/// Pure UI — no conversion is performed.
+fn print_config_info(name: &str) -> Result<()> {
+    let cfg = Config::parse(name).map_err(|e| anyhow::anyhow!("{e}"))?;
+    let (from, to) = config_endpoints(cfg);
+
+    let (sample_in, sample_out) = match cfg {
+        Config::S2t => ("汉字计算机软件", "漢字計算機軟體"),
+        Config::T2s => ("漢字計算機", "汉字计算机"),
+        Config::S2tw => ("软件 内存 网络", "軟體 記憶體 網路"),
+        Config::Tw2s => ("軟體 網路 檔案", "软件 内存 网络"),
+        Config::S2hk => ("软件 内存 网络", "軟件 記憶體 網絡"),
+        Config::Hk2s => ("軟件 記憶體 網絡", "软件 内存 网络"),
+        Config::S2twp => ("鼠标 打印 软件", "滑鼠 列印 軟體"),
+        Config::Tw2sp => ("滑鼠 印表機 軟體", "鼠标 打印机 软件"),
+        Config::S2hkp => ("鼠标 打印 软件", "滑鼠 列印 軟件"),
+        Config::Hk2sp => ("滑鼠 列表機 軟件", "鼠标 打印机 软件"),
+        Config::T2tw => ("软件 内存", "軟體 記憶體"),
+        Config::Tw2t => ("軟體 記憶體", "软件 内存"),
+        Config::T2hk => ("软件 内存", "軟件 記憶體"),
+        Config::Hk2t => ("軟件 記憶體", "软件 内存"),
+        Config::T2jp => ("辻 蠟燭 弁當", "辻 蝋燭 弁当"),
+        Config::Jp2t => ("辻 蝋燭 弁当", "辻 蠟燭 弁當"),
+    };
+
+    println!("Config:      {}", cfg.name());
+    println!("Description: {}", cfg.description());
+    println!("From:        {from}");
+    println!("To:          {to}");
+    println!();
+    println!("Example:");
+    println!("  in:  {}", sample_in);
+    println!("  out: {}", sample_out);
+    Ok(())
+}
+
+/// Best-effort source/target regions for each config. Used by
+/// `print_config_info`. Returns the natural pair; configs that don't
+/// cleanly map to a single from/to pair (none in the current set)
+/// would need a more elaborate description, but the 16 built-ins all
+/// have a clear pair.
+fn config_endpoints(cfg: Config) -> (&'static str, &'static str) {
+    match cfg {
+        Config::S2t => ("cn-s", "cn-t"),
+        Config::T2s => ("cn-t", "cn-s"),
+        Config::S2tw => ("cn-s", "cn-tw"),
+        Config::Tw2s => ("cn-tw", "cn-s"),
+        Config::S2hk => ("cn-s", "cn-hk"),
+        Config::Hk2s => ("cn-hk", "cn-s"),
+        Config::S2twp => ("cn-s", "cn-tw"),
+        Config::Tw2sp => ("cn-tw", "cn-s"),
+        Config::S2hkp => ("cn-s", "cn-hk"),
+        Config::Hk2sp => ("cn-hk", "cn-s"),
+        Config::T2tw => ("cn-t", "cn-tw"),
+        Config::Tw2t => ("cn-tw", "cn-t"),
+        Config::T2hk => ("cn-t", "cn-hk"),
+        Config::Hk2t => ("cn-hk", "cn-t"),
+        Config::T2jp => ("jp-t", "jp-n"),
+        Config::Jp2t => ("jp-n", "jp-t"),
     }
 }
