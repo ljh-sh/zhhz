@@ -266,39 +266,69 @@ pub fn detect_text(text: &str) -> Option<Detection> {
         return None;
     }
 
-    // Chinese branch.
-    // Use **region-exclusive** phrases (TW values not in HK's value set, and
-    // vice versa) to disambiguate. Many regional phrases overlap (`滑鼠`,
-    // `伊利諾` are used in both Taiwan and Hong Kong) — counting them as
-    // signal produces false positives. Scoring by total matched characters
-    // of the exclusive sets gives the longer, more specific phrases
-    // appropriate weight.
+    // Chinese branch — TW/HK regional disambiguation.
+    //
+    // Two signal layers:
+    //
+    // 1. **Exclusive phrase hits** (TW phrases not in HK's value set, or vice
+    //    versa) are strong signals — they only appear in one region in the
+    //    OpenCC data. Use absolute character count, not 2× ratio, so short
+    //    texts aren't starved of evidence.
+    //
+    // 2. **Shared phrase hits** (TW and HK dicts both have the value, e.g.
+    //    `滑鼠`, `伊利諾`) are weak signals. They're regional-traditional
+    //    forms (not Mainland), so they say "this is at least TW or HK", but
+    //    can't tell which. When only shared hits exist and no exclusive
+    //    signal breaks the tie, default to TW — Taiwan traditional usage is
+    //    much more common in real-world corpora, and OpenCC's `s2t` and
+    //    `s2tw` configs treat TW as the default traditional target.
     let tw_phrases = tw_phrases();
     let hk_phrases = hk_phrases();
     let hk_set: HashSet<&str> = hk_phrases.iter().map(|s| s.as_str()).collect();
     let tw_set: HashSet<&str> = tw_phrases.iter().map(|s| s.as_str()).collect();
-    let tw_total_chars: usize = tw_phrases
+
+    let tw_only_chars: usize = tw_phrases
         .iter()
         .filter(|p| !hk_set.contains(p.as_str()))
         .filter(|p| text.contains(p.as_str()))
         .map(|p| p.chars().count())
         .sum();
-    let hk_total_chars: usize = hk_phrases
+    let hk_only_chars: usize = hk_phrases
         .iter()
         .filter(|p| !tw_set.contains(p.as_str()))
         .filter(|p| text.contains(p.as_str()))
         .map(|p| p.chars().count())
         .sum();
-    if tw_total_chars > hk_total_chars && tw_total_chars > 0 {
+    let shared_chars: usize = tw_phrases
+        .iter()
+        .filter(|p| hk_set.contains(p.as_str()))
+        .filter(|p| text.contains(p.as_str()))
+        .map(|p| p.chars().count())
+        .sum();
+
+    // Strong signal: one region has exclusive phrases the other doesn't.
+    if tw_only_chars > hk_only_chars && tw_only_chars > 0 {
         return Some(Detection {
             region: Region::CnTw,
             confidence: pct(cn_t + cn_tw, total_cjk).max(50),
         });
     }
-    if hk_total_chars > tw_total_chars && hk_total_chars > 0 {
+    if hk_only_chars > tw_only_chars && hk_only_chars > 0 {
         return Some(Detection {
             region: Region::CnHk,
             confidence: (pct(cn_t + cn_hk, total_cjk)).max(50),
+        });
+    }
+
+    // Tie: if both regions have zero exclusive phrases but at least one
+    // shared phrase hit, default to TW. This is the "滑鼠" case — a TW/HK
+    // shared regional-traditional phrase with no HK-only counter-signal.
+    // Taiwan is the dominant regional-traditional variant in real corpora,
+    // so prefer TW unless HK-only evidence forces cn-hk.
+    if tw_only_chars == hk_only_chars && shared_chars > 0 {
+        return Some(Detection {
+            region: Region::CnTw,
+            confidence: pct(cn_t + cn_tw, total_cjk).max(40),
         });
     }
 
@@ -586,6 +616,16 @@ mod tests {
         // 維吉尼亞/西維 for Virginia, while Taiwan uses 弗吉尼亞/西弗).
         let d = detect_text("他去了西維珍尼亞州").expect("has CJK");
         assert_eq!(d.region, Region::CnHk);
+    }
+
+    #[test]
+    fn regional_shared_phrase_defaults_to_tw() {
+        // "滑鼠" is in BOTH TW and HK phrase dicts (used in both regions
+        // for "mouse"). No exclusive signal either way. Default to TW since
+        // Taiwan is the dominant regional-traditional variant in real
+        // corpora.
+        let d = detect_text("我買了新的滑鼠很好用").expect("has CJK");
+        assert_eq!(d.region, Region::CnTw);
     }
 
     #[test]
