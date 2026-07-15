@@ -108,6 +108,11 @@ pub enum ModeFlag {
     Trigram,
 }
 
+// Cli carries every flag the parser supports, so the Run variant is
+// much larger than Help / Version. Boxing it would force a heap
+// allocation per parse for marginal size savings. Accept the larger
+// enum instead — clippy::large_enum_variant is opt-in noise here.
+#[allow(clippy::large_enum_variant)]
 enum Action {
     Run(Box<Cli>),
     Help,
