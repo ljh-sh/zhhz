@@ -106,8 +106,8 @@ jobs:
             os: ubuntu-latest
             cross: true
           - target: x86_64-pc-windows-gnu
-            os: ubuntu-latest
-            cross: true
+            os: windows-latest
+            cross: false
           - target: x86_64-apple-darwin
             os: macos-latest
             cross: false
