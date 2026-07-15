@@ -6,7 +6,11 @@ fn main() {
     let cases = vec![
         ("这出戏真好看", "這齣戲真好看", "ngram 修过的核心 case"),
         ("这出戏", "這齣戲", "ngram 修过的核心 case (短)"),
-        ("彷佛", "彷彿", "my erroneous test case (应当 phrase dict 修)"),
+        (
+            "彷佛",
+            "彷彿",
+            "my erroneous test case (应当 phrase dict 修)",
+        ),
         ("仿佛", "彷彿", "phrase dict 已修 — 基线"),
     ];
 
@@ -16,31 +20,37 @@ fn main() {
     for (src, exp, note) in &cases {
         let got = c.convert(src);
         let ok = if got == *exp { "✓" } else { "✗" };
-        println!("  [{}] {:20} → {:20} (期望 {:20}) {}", ok, src, got, exp, note);
+        println!(
+            "  [{}] {:20} → {:20} (期望 {:20}) {}",
+            ok, src, got, exp, note
+        );
     }
 
     // try: fast + custom dict for 这出戏
     println!();
     println!("=== 2. fast + custom dict (这出戏 → 這齣戲) ===");
-    let c = Converter::with_custom(
-        Config::S2t,
-        &[("这出戏".to_string(), "這齣戲".to_string())],
-    );
+    let c = Converter::with_custom(Config::S2t, &[("这出戏".to_string(), "這齣戲".to_string())]);
     for (src, exp, note) in &cases {
         let got = c.convert(src);
         let ok = if got == *exp { "✓" } else { "✗" };
-        println!("  [{}] {:20} → {:20} (期望 {:20}) {}", ok, src, got, exp, note);
+        println!(
+            "  [{}] {:20} → {:20} (期望 {:20}) {}",
+            ok, src, got, exp, note
+        );
     }
 
     // baseline: trigram
     println!();
     println!("=== 3. trigram (no custom) ===");
-    use zhhz::{NgramModel, NgramMode};
+    use zhhz::{NgramMode, NgramModel};
     let model = NgramModel::from_file("/tmp/ngram-out/3gram.arpa").expect("3gram");
     let c = Converter::new(Config::S2t).with_ngram(model, NgramMode::Trigram);
     for (src, exp, note) in &cases {
         let got = c.convert(src);
         let ok = if got == *exp { "✓" } else { "✗" };
-        println!("  [{}] {:20} → {:20} (期望 {:20}) {}", ok, src, got, exp, note);
+        println!(
+            "  [{}] {:20} → {:20} (期望 {:20}) {}",
+            ok, src, got, exp, note
+        );
     }
 }
