@@ -29,7 +29,7 @@ requires-python = ">=3.9"
 
 [project.urls]
 Homepage = "https://github.com/ljh-sh/zhhz"
-Documentation = "https://ljh-sh.github.io/zhhz/"
+Documentation = "https://zhhz.ljh.sh/"
 Source = "https://github.com/ljh-sh/zhhz"
 Issues = "https://github.com/ljh-sh/zhhz/issues"
 
