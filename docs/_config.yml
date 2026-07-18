@@ -8,8 +8,8 @@ description: Self-contained Simplified/Traditional Chinese converter — pure-Ru
 # our custom stylesheet is the only CSS served. (`theme: null` is
 # what Jekyll's docs recommend for "no theme".)
 theme: ~
-baseurl: "/zhhz"
-url: "https://ljh-sh.github.io"
+baseurl: ""
+url: "https://zhhz.ljh.sh"
 
 permalink: pretty
 
