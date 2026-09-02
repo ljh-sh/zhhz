@@ -9,7 +9,7 @@
 
 `zhhz` converts between Simplified and Traditional Chinese (plus Taiwan, Hong Kong, and Japanese-shinjitai variants) using the OpenCC dictionaries, and detects the script variant of Chinese text. **All dictionaries are embedded in the binary at compile time** — one ~1.86 MB static binary (or 588 KB xz-compressed) with no runtime download and no separate data directory.
 
-The name is a palindrome: **zh** hanzi, and **z**huan **h**uan **h**an **z**i (转换汉字, "convert Chinese characters").
+The name is a palindrome: **zh** hanzi（中国汉字), and **z**huan **h**uan **h**an **z**i (转换汉字, "convert Chinese characters").
 
 ## Why
 
