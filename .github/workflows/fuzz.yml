@@ -57,8 +57,14 @@ jobs:
         # building with `cargo fuzz build --sanitizer=none` (no sanitizer
         # flag from cargo-fuzz) and adding the matrix sanitizer through
         # RUSTFLAGS.
+        #
+        # Matrix uses `ubsan` (not `undefined`) because GitHub Actions
+        # silently drops matrix jobs whose value is the literal
+        # `undefined`. The RUSTFLAGS expression below maps the friendly
+        # matrix name `ubsan` to the rustc value `undefined` that
+        # `-Z sanitizer=` accepts.
         env:
-          RUSTFLAGS: -Z sanitizer=${{ matrix.sanitizer }}
+          RUSTFLAGS: -Z sanitizer=${{ matrix.sanitizer == 'ubsan' && 'undefined' || matrix.sanitizer }}
         run: |
           cd fuzz
           cargo +nightly-2024-09-01 fuzz build --sanitizer=none ${{ matrix.target }}
