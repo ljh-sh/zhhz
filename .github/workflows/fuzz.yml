@@ -48,12 +48,27 @@ jobs:
         run: cargo +nightly install cargo-fuzz
 
       - name: Run fuzzer (${{ matrix.sanitizer }}, 60s)
+        # cargo-fuzz injects `-Zsanitizer=address` for coverage instrumentation,
+        # so naively setting `RUSTFLAGS=-Z sanitizer=memory|undefined` activates
+        # two sanitizers at once and the build fails. We work around it by
+        # building with `cargo fuzz build --sanitizer=none` (no sanitizer flag
+        # from cargo-fuzz) and adding the matrix sanitizer purely through
+        # RUSTFLAGS, then running the binary directly. This keeps the
+        # RUSTFLAGS-only authoring style uniform across the matrix.
         env:
           RUSTFLAGS: -Z sanitizer=${{ matrix.sanitizer }}
         run: |
           cd fuzz
-          cargo +nightly fuzz run ${{ matrix.target }} -- \
-            -max_total_time=60
+          cargo +nightly fuzz build \
+            --sanitizer=none \
+            ${{ matrix.target }}
+          BINARY=$(find target -type f -name "${{ matrix.target }}" -perm -u+x | head -n1)
+          if [ -z "$BINARY" ]; then
+            echo "::error::Built binary not found for ${{ matrix.target }}"
+            exit 1
+          fi
+          echo "Running $BINARY"
+          "$BINARY" -max_total_time=60
 
       - name: Upload corpus on failure
         if: failure()
