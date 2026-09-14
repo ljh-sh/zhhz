@@ -29,7 +29,7 @@ jobs:
         sanitizer:
           - address
           - memory
-          - undefined
+          - ubsan
     steps:
       - name: Checkout
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -59,7 +59,7 @@ jobs:
         # rustc's accepted values after stable-2024-11-28 (nightly 1.99+
         # rejects it). UBSan still works via the LLVM-level flag, so we
         # forward `-fsanitize=undefined -fno-sanitize-recover=undefined`
-        # through `llvm-args` when the matrix value is `undefined`. ASan
+        # through `llvm-args` when the matrix value is `ubsan`. ASan
         # and MSan keep the cleaner `-Z sanitizer=<s>` path.
         env:
           RUSTFLAGS: >-
@@ -69,7 +69,7 @@ jobs:
             -C llvm-args=-fsanitize=undefined
         run: |
           cd fuzz
-          if [ "${{ matrix.sanitizer }}" = "undefined" ]; then
+          if [ "${{ matrix.sanitizer }}" = "ubsan" ]; then
             RUSTFLAGS="$RUSTFLAGS $UBSAN_FLAGS" \
               cargo +nightly fuzz build --sanitizer=none ${{ matrix.target }}
           else
