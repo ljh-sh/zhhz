@@ -26,10 +26,14 @@ jobs:
         target:
           - fmm_segment
           - convert_roundtrip
+        # cargo-fuzz 0.12 only accepts address / memory (and leak / thread /
+        # none). UBSan (`-Z sanitizer=undefined`) conflicts with cargo-fuzz's
+        # built-in coverage instrumentation, so we run UBSan at the
+        # OSS-Fuzz layer instead (issue #73) where the infrastructure knows
+        # how to set it up cleanly.
         sanitizer:
           - address
           - memory
-          - undefined
     steps:
       - name: Checkout
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -68,6 +72,7 @@ jobs:
           name: fuzz-corpus-${{ matrix.target }}-${{ matrix.sanitizer }}
           path: fuzz/corpus/${{ matrix.target }}/
           retention-days: 14
+          if-no-files-found: ignore
 
       - name: Upload crash artifacts on failure
         if: failure()
