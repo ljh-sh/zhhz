@@ -60,14 +60,18 @@ jobs:
         #
         # Matrix uses `ubsan` (not `undefined`) because GitHub Actions
         # silently drops matrix jobs whose value is the literal
-        # `undefined`. The RUSTFLAGS expression below maps the friendly
-        # matrix name `ubsan` to the rustc value `undefined` that
-        # `-Z sanitizer=` accepts.
-        env:
-          RUSTFLAGS: -Z sanitizer=${{ matrix.sanitizer == 'ubsan' && 'undefined' || matrix.sanitizer }}
+        # `undefined`. The bash branch below maps the friendly matrix
+        # name `ubsan` to the rustc value `undefined` that `-Z sanitizer=`
+        # accepts.
         run: |
           cd fuzz
-          cargo +nightly-2024-09-01 fuzz build --sanitizer=none ${{ matrix.target }}
+          if [ "${{ matrix.sanitizer }}" = "ubsan" ]; then
+            RUSTFLAGS="-Z sanitizer=undefined" \
+              cargo +nightly-2024-09-01 fuzz build --sanitizer=none ${{ matrix.target }}
+          else
+            RUSTFLAGS="-Z sanitizer=${{ matrix.sanitizer }}" \
+              cargo +nightly-2024-09-01 fuzz build --sanitizer=none ${{ matrix.target }}
+          fi
           BINARY=$(find target -type f -name "${{ matrix.target }}" -perm -u+x | head -n1)
           if [ -z "$BINARY" ]; then
             echo "::error::Built binary not found for ${{ matrix.target }}"
