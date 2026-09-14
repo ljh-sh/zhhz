@@ -26,11 +26,12 @@ jobs:
         target:
           - fmm_segment
           - convert_roundtrip
-        # cargo-fuzz 0.12 only accepts address / memory (and leak / thread /
-        # none). UBSan (`-Z sanitizer=undefined`) conflicts with cargo-fuzz's
-        # built-in coverage instrumentation, so we run UBSan at the
-        # OSS-Fuzz layer instead (issue #73) where the infrastructure knows
-        # how to set it up cleanly.
+        # cargo-fuzz 0.12 only accepts address / memory / leak / thread / none.
+        # UBSan (`-Z sanitizer=undefined`) was removed from rustc's accepted
+        # values sometime after stable-2024-11-28 — nightly-2024-12-01 already
+        # rejects `undefined`. Route UBSan through the OSS-Fuzz layer
+        # (issue #73) where the base-builder image pins a Rust toolchain
+        # that still knows how to enable it.
         sanitizer:
           - address
           - memory
@@ -52,12 +53,11 @@ jobs:
         run: cargo +nightly install cargo-fuzz
 
       - name: Run fuzzer (${{ matrix.sanitizer }}, 60s)
-        # cargo-fuzz internally adds `-Zsanitizer=address` for coverage
-        # instrumentation, so naively setting `RUSTFLAGS=-Z sanitizer=memory`
-        # ends up activating two sanitizers at once (which conflicts and the
-        # build fails). cargo-fuzz 0.11+ exposes `--sanitizer=<s>` which
-        # overrides its default cleanly, so we route the sanitizer through
-        # that flag instead.
+        # cargo-fuzz injects `-Zsanitizer=address` for coverage instrumentation,
+        # so naively setting RUSTFLAGS=-Z sanitizer=<s> activates two
+        # sanitizers at once and the build fails. cargo-fuzz 0.11+ exposes
+        # `--sanitizer=<s>` which overrides its default cleanly, so we route
+        # the matrix sanitizer through that flag instead.
         run: |
           cd fuzz
           cargo +nightly fuzz run \
@@ -72,7 +72,6 @@ jobs:
           name: fuzz-corpus-${{ matrix.target }}-${{ matrix.sanitizer }}
           path: fuzz/corpus/${{ matrix.target }}/
           retention-days: 14
-          if-no-files-found: ignore
 
       - name: Upload crash artifacts on failure
         if: failure()
