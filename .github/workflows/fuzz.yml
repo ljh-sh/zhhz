@@ -40,12 +40,15 @@ jobs:
           toolchain: stable-2024-11-28
           components: rustfmt, clippy
 
-      - name: Install nightly toolchain (sanitizers + cargo-fuzz)
+      - name: Install pinned nightly (sanitizers + cargo-fuzz)
+        # `-Z sanitizer=undefined` was removed from rustc after nightly
+        # ~2024-11; nightly-2024-09 still accepts all three (address,
+        # memory, undefined) so we pin there for the GH Actions matrix.
         run: |
-          rustup toolchain install nightly --profile minimal --component rust-src
+          rustup toolchain install nightly-2024-09-01 --profile minimal --component rust-src
 
-      - name: cargo +nightly install cargo-fuzz
-        run: cargo +nightly install cargo-fuzz
+      - name: cargo +nightly-2024-09-01 install cargo-fuzz
+        run: cargo +nightly-2024-09-01 install cargo-fuzz
 
       - name: Run fuzzer (${{ matrix.sanitizer }}, 60s)
         # cargo-fuzz injects `-Zsanitizer=address` for coverage instrumentation,
@@ -69,13 +72,7 @@ jobs:
             -C llvm-args=-fno-sanitize-recover=undefined
         run: |
           cd fuzz
-          if [ "${{ matrix.sanitizer }}" = "ubsan" ]; then
-            RUSTFLAGS="$UBSAN_FLAGS" \
-              cargo +nightly fuzz build --sanitizer=none ${{ matrix.target }}
-          else
-            RUSTFLAGS="-Z sanitizer=${{ matrix.sanitizer }}" \
-              cargo +nightly fuzz build --sanitizer=none ${{ matrix.target }}
-          fi
+          cargo +nightly-2024-09-01 fuzz build --sanitizer=none ${{ matrix.target }}
           BINARY=$(find target -type f -name "${{ matrix.target }}" -perm -u+x | head -n1)
           if [ -z "$BINARY" ]; then
             echo "::error::Built binary not found for ${{ matrix.target }}"
