@@ -48,12 +48,18 @@ jobs:
         run: cargo +nightly install cargo-fuzz
 
       - name: Run fuzzer (${{ matrix.sanitizer }}, 60s)
-        env:
-          RUSTFLAGS: -Z sanitizer=${{ matrix.sanitizer }}
+        # cargo-fuzz internally adds `-Zsanitizer=address` for coverage
+        # instrumentation, so naively setting `RUSTFLAGS=-Z sanitizer=memory`
+        # ends up activating two sanitizers at once (which conflicts and the
+        # build fails). cargo-fuzz 0.11+ exposes `--sanitizer=<s>` which
+        # overrides its default cleanly, so we route the sanitizer through
+        # that flag instead.
         run: |
           cd fuzz
-          cargo +nightly fuzz run ${{ matrix.target }} -- \
-            -max_total_time=60
+          cargo +nightly fuzz run \
+            --sanitizer=${{ matrix.sanitizer }} \
+            ${{ matrix.target }} \
+            -- -max_total_time=60
 
       - name: Upload corpus on failure
         if: failure()
