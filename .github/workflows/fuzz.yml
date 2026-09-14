@@ -26,15 +26,10 @@ jobs:
         target:
           - fmm_segment
           - convert_roundtrip
-        # cargo-fuzz 0.12 only accepts address / memory / leak / thread / none.
-        # UBSan (`-Z sanitizer=undefined`) was removed from rustc's accepted
-        # values sometime after stable-2024-11-28 — nightly-2024-12-01 already
-        # rejects `undefined`. Route UBSan through the OSS-Fuzz layer
-        # (issue #73) where the base-builder image pins a Rust toolchain
-        # that still knows how to enable it.
         sanitizer:
           - address
           - memory
+          - ubsan
     steps:
       - name: Checkout
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -45,25 +40,35 @@ jobs:
           toolchain: stable-2024-11-28
           components: rustfmt, clippy
 
-      - name: Install nightly toolchain (sanitizers + cargo-fuzz)
+      - name: Install pinned nightly (sanitizers + cargo-fuzz)
+        # `-Z sanitizer=undefined` was removed from rustc after nightly
+        # ~2024-11; nightly-2024-09-01 still accepts all three (address,
+        # memory, undefined) so we pin there for the GH Actions matrix.
         run: |
-          rustup toolchain install nightly --profile minimal --component rust-src
+          rustup toolchain install nightly-2024-09-01 --profile minimal --component rust-src
 
-      - name: cargo +nightly install cargo-fuzz
-        run: cargo +nightly install cargo-fuzz
+      - name: cargo +nightly-2024-09-01 install cargo-fuzz
+        run: cargo +nightly-2024-09-01 install cargo-fuzz
 
       - name: Run fuzzer (${{ matrix.sanitizer }}, 60s)
         # cargo-fuzz injects `-Zsanitizer=address` for coverage instrumentation,
         # so naively setting RUSTFLAGS=-Z sanitizer=<s> activates two
-        # sanitizers at once and the build fails. cargo-fuzz 0.11+ exposes
-        # `--sanitizer=<s>` which overrides its default cleanly, so we route
-        # the matrix sanitizer through that flag instead.
+        # sanitizers at once and the build fails. We work around it by
+        # building with `cargo fuzz build --sanitizer=none` (no sanitizer
+        # flag from cargo-fuzz) and adding the matrix sanitizer through
+        # RUSTFLAGS.
+        env:
+          RUSTFLAGS: -Z sanitizer=${{ matrix.sanitizer }}
         run: |
           cd fuzz
-          cargo +nightly fuzz run \
-            --sanitizer=${{ matrix.sanitizer }} \
-            ${{ matrix.target }} \
-            -- -max_total_time=60
+          cargo +nightly-2024-09-01 fuzz build --sanitizer=none ${{ matrix.target }}
+          BINARY=$(find target -type f -name "${{ matrix.target }}" -perm -u+x | head -n1)
+          if [ -z "$BINARY" ]; then
+            echo "::error::Built binary not found for ${{ matrix.target }}"
+            exit 1
+          fi
+          echo "Running $BINARY"
+          "$BINARY" -max_total_time=60
 
       - name: Upload corpus on failure
         if: failure()
