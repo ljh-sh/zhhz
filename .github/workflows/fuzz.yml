@@ -42,7 +42,7 @@ jobs:
 
       - name: Install pinned nightly (sanitizers + cargo-fuzz)
         # `-Z sanitizer=undefined` was removed from rustc after nightly
-        # ~2024-11; nightly-2024-09 still accepts all three (address,
+        # ~2024-11; nightly-2024-09-01 still accepts all three (address,
         # memory, undefined) so we pin there for the GH Actions matrix.
         run: |
           rustup toolchain install nightly-2024-09-01 --profile minimal --component rust-src
@@ -57,19 +57,8 @@ jobs:
         # building with `cargo fuzz build --sanitizer=none` (no sanitizer
         # flag from cargo-fuzz) and adding the matrix sanitizer through
         # RUSTFLAGS.
-        #
-        # UBSan special-case: `-Z sanitizer=undefined` (and any `ubsan`
-        # alias) was removed from rustc's accepted values after
-        # stable-2024-11-28 (nightly 1.99+ rejects it). UBSan still works
-        # via the LLVM-level flag, so we forward
-        # `-fsanitize=undefined -fno-sanitize-recover=undefined` through
-        # `llvm-args` and skip `-Z sanitizer=` entirely when the matrix
-        # value is `ubsan`. ASan and MSan keep the cleaner `-Z sanitizer=<s>`
-        # path.
         env:
-          UBSAN_FLAGS: >-
-            -C llvm-args=-fsanitize=undefined
-            -C llvm-args=-fno-sanitize-recover=undefined
+          RUSTFLAGS: -Z sanitizer=${{ matrix.sanitizer }}
         run: |
           cd fuzz
           cargo +nightly-2024-09-01 fuzz build --sanitizer=none ${{ matrix.target }}
