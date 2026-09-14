@@ -55,25 +55,26 @@ jobs:
         # flag from cargo-fuzz) and adding the matrix sanitizer through
         # RUSTFLAGS.
         #
-        # UBSan special-case: `-Z sanitizer=undefined` was removed from
-        # rustc's accepted values after stable-2024-11-28 (nightly 1.99+
-        # rejects it). UBSan still works via the LLVM-level flag, so we
-        # forward `-fsanitize=undefined -fno-sanitize-recover=undefined`
-        # through `llvm-args` when the matrix value is `ubsan`. ASan
-        # and MSan keep the cleaner `-Z sanitizer=<s>` path.
+        # UBSan special-case: `-Z sanitizer=undefined` (and any `ubsan`
+        # alias) was removed from rustc's accepted values after
+        # stable-2024-11-28 (nightly 1.99+ rejects it). UBSan still works
+        # via the LLVM-level flag, so we forward
+        # `-fsanitize=undefined -fno-sanitize-recover=undefined` through
+        # `llvm-args` and skip `-Z sanitizer=` entirely when the matrix
+        # value is `ubsan`. ASan and MSan keep the cleaner `-Z sanitizer=<s>`
+        # path.
         env:
-          RUSTFLAGS: >-
-            -Z sanitizer=${{ matrix.sanitizer }}
           UBSAN_FLAGS: >-
             -C llvm-args=-fsanitize=undefined
             -C llvm-args=-fno-sanitize-recover=undefined
         run: |
           cd fuzz
           if [ "${{ matrix.sanitizer }}" = "ubsan" ]; then
-            RUSTFLAGS="$RUSTFLAGS $UBSAN_FLAGS" \
+            RUSTFLAGS="$UBSAN_FLAGS" \
               cargo +nightly fuzz build --sanitizer=none ${{ matrix.target }}
           else
-            cargo +nightly fuzz build --sanitizer=none ${{ matrix.target }}
+            RUSTFLAGS="-Z sanitizer=${{ matrix.sanitizer }}" \
+              cargo +nightly fuzz build --sanitizer=none ${{ matrix.target }}
           fi
           BINARY=$(find target -type f -name "${{ matrix.target }}" -perm -u+x | head -n1)
           if [ -z "$BINARY" ]; then
