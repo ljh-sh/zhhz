@@ -64,9 +64,9 @@ jobs:
         env:
           RUSTFLAGS: >-
             -Z sanitizer=${{ matrix.sanitizer }}
-            -C llvm-args=-fsanitize-recover=false
           UBSAN_FLAGS: >-
             -C llvm-args=-fsanitize=undefined
+            -C llvm-args=-fno-sanitize-recover=undefined
         run: |
           cd fuzz
           if [ "${{ matrix.sanitizer }}" = "ubsan" ]; then
