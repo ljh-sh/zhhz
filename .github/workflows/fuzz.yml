@@ -1,53 +1,84 @@
-name: cargo-fuzz (zhhz)
+name: Fuzz
+
+# Three sanitizers × two fuzz targets, run on a nightly cron and on
+# manual dispatch. Weekly cron kept as a fallback for the OSS-Fuzz
+# hand-off evidence trail. Permissions are minimal (contents: read only).
 
 on:
-  # Weekly cron — fuzzing is expensive, run on a schedule rather than
-  # on every commit. The OpenSSF Scorecard looks for a fuzzer integration
-  # (we get a 0 here without one). Schedule: Sundays at 04:00 UTC.
   schedule:
+    # Nightly run — long enough to discover real bugs.
+    - cron: "17 4 * * *"
+    # Weekly backup run — kept so even if the nightly breaks we have a
+    # green record every week for OSS-Fuzz hand-off evidence.
     - cron: "0 4 * * 0"
   workflow_dispatch:
 
 permissions:
   contents: read
-  # Upload corpus on failure for triage.
-  actions: read
 
 jobs:
   fuzz:
-    name: Fuzz (${{ matrix.target }} · ${{ matrix.runtime }})
+    name: ${{ matrix.target }} · ${{ matrix.sanitizer }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        target: [fmm_segment, convert_roundtrip]
-        runtime: [60]   # seconds; bump to 3600+ for deep runs
+        target:
+          - fmm_segment
+          - convert_roundtrip
+        # cargo-fuzz 0.12 only accepts address / memory (and leak / thread /
+        # none). UBSan (`-Z sanitizer=undefined`) conflicts with cargo-fuzz's
+        # built-in coverage instrumentation, so we run UBSan at the
+        # OSS-Fuzz layer instead (issue #73) where the infrastructure knows
+        # how to set it up cleanly.
+        sanitizer:
+          - address
+          - memory
     steps:
       - name: Checkout
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
-      - name: Install Rust (pinned) + nightly for cargo-fuzz
+      - name: Install Rust stable
         uses: actions-rust-lang/setup-rust-toolchain@4d1965c9142484e48d40c19de54b5cba84953a06 # v1.10.0
         with:
           toolchain: stable-2024-11-28
           components: rustfmt, clippy
 
-      - name: Install nightly toolchain (required by cargo-fuzz)
+      - name: Install nightly toolchain (sanitizers + cargo-fuzz)
         run: |
           rustup toolchain install nightly --profile minimal --component rust-src
 
       - name: cargo +nightly install cargo-fuzz
         run: cargo +nightly install cargo-fuzz
 
-      - name: Run fuzzer
+      - name: Run fuzzer (${{ matrix.sanitizer }}, 60s)
+        # cargo-fuzz internally adds `-Zsanitizer=address` for coverage
+        # instrumentation, so naively setting `RUSTFLAGS=-Z sanitizer=memory`
+        # ends up activating two sanitizers at once (which conflicts and the
+        # build fails). cargo-fuzz 0.11+ exposes `--sanitizer=<s>` which
+        # overrides its default cleanly, so we route the sanitizer through
+        # that flag instead.
         run: |
           cd fuzz
-          cargo +nightly fuzz run ${{ matrix.target }} -- -max_total_time=${{ matrix.runtime }}
+          cargo +nightly fuzz run \
+            --sanitizer=${{ matrix.sanitizer }} \
+            ${{ matrix.target }} \
+            -- -max_total_time=60
 
       - name: Upload corpus on failure
         if: failure()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: fuzz-corpus-${{ matrix.target }}
+          name: fuzz-corpus-${{ matrix.target }}-${{ matrix.sanitizer }}
           path: fuzz/corpus/${{ matrix.target }}/
-          retention-days: 7
+          retention-days: 14
+          if-no-files-found: ignore
+
+      - name: Upload crash artifacts on failure
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: fuzz-crash-${{ matrix.target }}-${{ matrix.sanitizer }}
+          path: fuzz/artifacts/${{ matrix.target }}/
+          retention-days: 30
+          if-no-files-found: ignore

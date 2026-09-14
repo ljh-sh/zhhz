@@ -3,14 +3,17 @@
 use libfuzzer_sys::fuzz_target;
 use zhhz::{Config, Converter};
 
-/// Fuzz the FMM (forward-maximal-match) segmentation + conversion
-/// pipeline. The interesting panics would be:
-///   - OOB read in the trie walk
-///   - N-gram disambiguation wrong-arity
-///   - Detection returning invalid region codes
-///
-/// Conversion is pure (no I/O), so a panic here is a real bug in the
-/// Rust core, not in I/O or allocation logic.
+// Fuzz the FMM (forward-maximal-match) segmentation + conversion
+// pipeline. The interesting panics would be:
+//   - OOB read in the trie walk
+//   - N-gram disambiguation wrong-arity
+//   - Detection returning invalid region codes
+//
+// Conversion is pure (no I/O), so a panic here is a real bug in the
+// Rust core, not in I/O or allocation logic.
+//
+// (Was `///` doc comments until nightly 2026-09; rustc now rejects
+// doc comments inside `fuzz_target!` as "unused doc comment".)
 fuzz_target!(|data: &[u8]| {
     if data.is_empty() {
         return;

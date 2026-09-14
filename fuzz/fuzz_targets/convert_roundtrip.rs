@@ -3,15 +3,18 @@
 use libfuzzer_sys::fuzz_target;
 use zhhz::{Config, Converter};
 
-/// Round-trip fuzz: convert Traditional → Simplified → Traditional
-/// and Simplified → Traditional → Simplified, and check the result
-/// is byte-identical to the input. Any divergence is a real bug
-/// (either the dictionary chain isn't idempotent, or there's
-/// loss-of-information in one direction).
-///
-/// Skips inputs that contain chars the engine doesn't handle
-/// (non-CJK + non-Latin), since those legitimately round-trip
-/// differently.
+// Round-trip fuzz: convert Traditional → Simplified → Traditional
+// and Simplified → Traditional → Simplified, and check the result
+// is byte-identical to the input. Any divergence is a real bug
+// (either the dictionary chain isn't idempotent, or there's
+// loss-of-information in one direction).
+//
+// Skips inputs that contain chars the engine doesn't handle
+// (non-CJK + non-Latin), since those legitimately round-trip
+// differently.
+//
+// (Was `///` doc comments until nightly 2026-09; rustc now rejects
+// doc comments inside `fuzz_target!` as "unused doc comment".)
 fuzz_target!(|data: &[u8]| {
     let text = String::from_utf8_lossy(data);
     let s2t = Converter::new(Config::S2t);

@@ -2,6 +2,7 @@
 
 [![CI](https://github.com/ljh-sh/zhhz/actions/workflows/ci.yml/badge.svg)](https://github.com/ljh-sh/zhhz/actions/workflows/ci.yml)
 [![Parity](https://github.com/ljh-sh/zhhz/actions/workflows/parity.yml/badge.svg)](https://github.com/ljh-sh/zhhz/actions/workflows/parity.yml)
+[![Fuzz](https://github.com/ljh-sh/zhhz/actions/workflows/fuzz.yml/badge.svg)](https://github.com/ljh-sh/zhhz/actions/workflows/fuzz.yml)
 [![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/ljh-sh/zhhz/badge)](https://scorecard.dev/viewer/?uri=github.com%2Fljh-sh%2Fzhhz)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 
