@@ -15,10 +15,10 @@
 ################################################################################
 # ClusterFuzzLite Dockerfile.
 #
-# ClusterFuzzLite's `compile` script expects build.sh at `$SRC/build.sh`
-# (the project root inside the container), not at `.clusterfuzzlite/build.sh`.
-# We copy it into place here so the Rust-specific build steps run from the
-# canonical location ClusterFuzzLite looks at.
+# ClusterFuzzLite's `compile` script invokes `/bin/bash <project_root>/build.sh`
+# (where <project_root> is wherever the project source ends up under the
+# base-builder's mount). For our layout, that's `/src/zhhz/build.sh`.
+# We COPY build.sh there before compile runs.
 #
 # zhhz has no system-level build deps for the fuzz crate: cargo-fuzz handles
 # everything through its own bundled nightly toolchain. We only need a build
@@ -26,8 +26,6 @@
 ################################################################################
 FROM gcr.io/oss-fuzz-base/base-builder-rust
 
-# Copy build.sh to the canonical ClusterFuzzLite location ($SRC/build.sh).
-# ClusterFuzzLite's compile wrapper invokes `/bin/bash -c compile` from the
-# base image, which in turn sources $SRC/build.sh.
-COPY .clusterfuzzlite/build.sh $SRC/build.sh
-RUN chmod +x $SRC/build.sh
+# Copy build.sh to the project root inside the container.
+COPY .clusterfuzzlite/build.sh /src/zhhz/build.sh
+RUN chmod +x /src/zhhz/build.sh
