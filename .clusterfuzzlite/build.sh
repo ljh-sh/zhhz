@@ -16,18 +16,18 @@
 ################################################################################
 # ClusterFuzzLite build script.
 #
-# Invoked by `google/clusterfuzzlite/actions/build_fuzzers@v1` inside the
-# `gcr.io/oss-fuzz-base/clusterfuzzlite-build-fuzzers:v1` action image.
-#
-# ClusterFuzzLite sets these env vars before invoking `compile`:
-#   $SRC      — root with the project source mounted
+# Invoked by `google/clusterfuzzlite/actions/build_fuzzers@v1` via the base
+# image's `compile` wrapper, which `cd`s into the project source dir and then
+# runs `/src/build.sh`. ClusterFuzzLite sets these env vars before invoking
+# `compile`:
+#   $SRC      — the project source root (varies across CFLite versions:
+#               sometimes `/src/<project>`, sometimes `/src`)
 #   $OUT      — destination directory for fuzz binaries
 #   $WORK     — scratch space for intermediate artifacts
-#   $CFLAGS, $CXXFLAGS, $LIB_FUZZING_ENGINE — C/C++ build (unused for Rust)
 #   $RUSTFLAGS — already includes `-Zsanitizer=<s>` and `--cfg fuzzing`
 #                for the active sanitizer; we MUST NOT pass `--sanitizer=`
-#                to `cargo fuzz` on top, because that would activate two
-#                sanitizers at once and the build would fail.
+#                to `cargo fuzz` on top (would activate two sanitizers at
+#                once and the build would fail).
 #   $SANITIZER, $FUZZING_ENGINE, $FUZZING_LANGUAGE, $ARCHITECTURE
 #
 # Output:
@@ -35,9 +35,10 @@
 #   $OUT/zhhz-fuzz-convert_roundtrip  (libFuzzer binary)
 ################################################################################
 
-# ClusterFuzzLite compiles the Rust project via `cargo fuzz build`, picking
-# up the sanitizer from the env-var RUSTFLAGS it has already set.
-cd "$SRC/zhhz/fuzz"
+# The compile wrapper `cd`s into the project root before running this script,
+# so PWD is the project root. We work relative to PWD for robustness against
+# different $SRC conventions.
+cd "$(dirname "$0")/../fuzz"  # → <project_root>/fuzz
 
 # `cargo fuzz build --release` matches what ClusterFuzzLite's Rust helper
 # expects (binary at target/<triple>/release/<name>). No `--sanitizer` flag
