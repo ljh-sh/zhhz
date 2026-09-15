@@ -26,7 +26,7 @@ jobs:
       matrix:
         sanitizer:
           - address
-          - memory
+          # - memory      # see cflite-pr.yml for why it's dropped here too.
           # - undefined  # see cflite-pr.yml for why it's dropped here too.
     steps:
       - name: Build Fuzzers (${{ matrix.sanitizer }})

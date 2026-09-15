@@ -23,7 +23,10 @@ jobs:
       matrix:
         sanitizer:
           - address
-          - memory
+          # - memory      # dropped: rustc 1.99 nightly in ClusterFuzzLite base
+                          # has a compiler_builtins linking bug under
+                          # -Z build-std + -Zsanitizer=memory. Re-enable when
+                          # upstream image is bumped past the bug.
           # - undefined  # dropped: rustc removed `-Z sanitizer=undefined`
                          # from its accepted values after nightly ~2024-11.
                          # ClusterFuzzLite uses a similar pinned toolchain
@@ -46,3 +49,7 @@ jobs:
           mode: "code-change"
           sanitizer: ${{ matrix.sanitizer }}
           output-sarif: true
+          # MSan was dropped from the matrix: current rustc 1.99 nightly in
+          # ClusterFuzzLite's base image has a linking bug in compiler_builtins
+          # under -Z build-std + -Zsanitizer=memory. Re-enable when the
+          # upstream image is bumped past the bug. Tracked in zhhz#73 follow-up.
