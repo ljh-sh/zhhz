@@ -1,0 +1,42 @@
+name: ClusterFuzzLite batch fuzzing
+
+# ClusterFuzzLite — batch fuzzing on a schedule.
+# Longer runs to discover deeper bugs that PR fuzzing misses, and to grow the
+# shared corpus used by future PR fuzzing runs (via storage-repo, see docs).
+# Spec: https://google.github.io/clusterfuzzlite/running-clusterfuzzlite/github-actions/
+
+on:
+  schedule:
+    - cron: "0 0/6 * * *"  # Every 6 hours.
+  workflow_dispatch:
+
+permissions: read-all
+
+jobs:
+  BatchFuzzing:
+    name: Batch fuzz (${{ matrix.sanitizer }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        sanitizer:
+          - address
+          - memory
+          # - undefined  # see cflite-pr.yml for why it's dropped here too.
+    steps:
+      - name: Build Fuzzers (${{ matrix.sanitizer }})
+        id: build
+        uses: google/clusterfuzzlite/actions/build_fuzzers@v1
+        with:
+          language: rust
+          sanitizer: ${{ matrix.sanitizer }}
+
+      - name: Run Fuzzers (${{ matrix.sanitizer }})
+        id: run
+        uses: google/clusterfuzzlite/actions/run_fuzzers@v1
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          fuzz-seconds: 3600
+          mode: "batch"
+          sanitizer: ${{ matrix.sanitizer }}
+          output-sarif: true

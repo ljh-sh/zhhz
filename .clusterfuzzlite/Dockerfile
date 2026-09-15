@@ -1,4 +1,4 @@
-# Copyright 2026 Google LLC
+# Copyright 2026 ljh-sh
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -13,19 +13,10 @@
 # limitations under the License.
 #
 ################################################################################
-# Dockerfile for OSS-Fuzz.
+# ClusterFuzzLite Dockerfile.
 #
-# In practice the canonical Dockerfile lives in google/oss-fuzz at
-# projects/zhhz/Dockerfile; this copy exists here so the project's
-# own repo carries the same definition and reviewers can audit it
-# without jumping between repos.
-#
-# Use the OSS-Fuzz Rust base image — it has nightly Rust, cargo-fuzz,
-# and the libFuzzer runtime pre-installed and pinned to a toolchain
-# that still supports `-Z sanitizer=undefined` (which rustc removed
-# from upstream nightlies after ~2024-11).
+# zhhz has no system-level build deps for the fuzz crate: cargo-fuzz handles
+# everything through its own bundled nightly toolchain. We only need a build
+# shell with bash + curl + git (already in the base image).
 ################################################################################
 FROM gcr.io/oss-fuzz-base/base-builder-rust
-
-# zhhz has no system-level build deps; everything is in the base image
-# plus cargo dependencies fetched during build.sh.
