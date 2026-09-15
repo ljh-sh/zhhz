@@ -17,14 +17,19 @@
 #
 # ClusterFuzzLite's base-builder `compile` wrapper runs:
 #     BUILD_CMD="bash -eux $SRC/build.sh"
-# So build.sh must live at `$SRC/build.sh` (i.e. `/src/build.sh` inside the
-# container), NOT inside the project subdir. We COPY it there explicitly.
+# so build.sh must live at `$SRC/build.sh` (i.e. /src/build.sh inside the
+# container), not inside the project subdir. We COPY it there explicitly.
 #
-# zhhz has no system-level build deps for the fuzz crate: cargo-fuzz handles
-# everything through its own bundled nightly toolchain. We only need a build
-# shell with bash + curl + git (already in the base image).
+# zhhz's fuzz crate uses `cargo fuzz build --release` which compiles against
+# the Rust standard library via `-Z build-std`. That requires the `rust-src`
+# component to be installed in the pinned nightly toolchain (the base image
+# doesn't ship it).
 ################################################################################
 FROM gcr.io/oss-fuzz-base/base-builder-rust
+
+# Install rust-src for the pinned nightly so `cargo +nightly fuzz build`
+# (which uses -Z build-std) can rebuild std under the active sanitizer.
+RUN rustup component add rust-src --toolchain nightly
 
 # Copy build.sh to the location the compile wrapper invokes.
 COPY .clusterfuzzlite/build.sh /src/build.sh
