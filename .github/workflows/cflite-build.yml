@@ -1,0 +1,38 @@
+name: ClusterFuzzLite continuous builds
+
+# ClusterFuzzLite — continuous builds on every push to main.
+# Verifies the fuzz harnesses compile under each sanitizer (no fuzzing here,
+# just build verification, so it stays cheap). The `upload-build: true`
+# output makes the build artifacts available for the run_fuzzers action in
+# downstream workflows.
+# Spec: https://google.github.io/clusterfuzzlite/running-clusterfuzzlite/github-actions/
+
+on:
+  push:
+    branches:
+      - main
+
+permissions: read-all
+
+jobs:
+  Build:
+    name: Build (${{ matrix.sanitizer }})
+    runs-on: ubuntu-latest
+    concurrency:
+      group: ${{ github.workflow }}-${{ matrix.sanitizer }}-${{ github.ref }}
+      cancel-in-progress: true
+    strategy:
+      fail-fast: false
+      matrix:
+        sanitizer:
+          - address
+          # - memory      # see cflite-pr.yml for why it's dropped here too.
+          # - undefined  # see cflite-pr.yml for why it's dropped here too.
+    steps:
+      - name: Build Fuzzers (${{ matrix.sanitizer }})
+        id: build
+        uses: google/clusterfuzzlite/actions/build_fuzzers@v1
+        with:
+          language: rust
+          sanitizer: ${{ matrix.sanitizer }}
+          upload-build: true
