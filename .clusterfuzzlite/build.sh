@@ -17,42 +17,46 @@
 # ClusterFuzzLite build script.
 #
 # Invoked by `google/clusterfuzzlite/actions/build_fuzzers@v1` inside the
-# base-builder-rust image. $SRC, $WORK, $OUT are set by ClusterFuzzLite.
+# `gcr.io/oss-fuzz-base/clusterfuzzlite-build-fuzzers:v1` action image.
 #
-# Outputs:
+# ClusterFuzzLite sets these env vars before invoking `compile`:
+#   $SRC      — root with the project source mounted
+#   $OUT      — destination directory for fuzz binaries
+#   $WORK     — scratch space for intermediate artifacts
+#   $CFLAGS, $CXXFLAGS, $LIB_FUZZING_ENGINE — C/C++ build (unused for Rust)
+#   $RUSTFLAGS — already includes `-Zsanitizer=<s>` and `--cfg fuzzing`
+#                for the active sanitizer; we MUST NOT pass `--sanitizer=`
+#                to `cargo fuzz` on top, because that would activate two
+#                sanitizers at once and the build would fail.
+#   $SANITIZER, $FUZZING_ENGINE, $FUZZING_LANGUAGE, $ARCHITECTURE
+#
+# Output:
 #   $OUT/zhhz-fuzz-fmm_segment        (libFuzzer binary)
 #   $OUT/zhhz-fuzz-convert_roundtrip  (libFuzzer binary)
 ################################################################################
 
-# ClusterFuzzLite provides the source via $SRC. Copy the fuzz project
-# into $SRC if it's not already there.
-if [ ! -d "$SRC/zhhz" ]; then
-    cp -R /workspace/zhhz "$SRC/zhhz"
-fi
-
+# ClusterFuzzLite compiles the Rust project via `cargo fuzz build`, picking
+# up the sanitizer from the env-var RUSTFLAGS it has already set.
 cd "$SRC/zhhz/fuzz"
 
-# cargo-fuzz uses its own bundled nightly toolchain, not the one
-# exposed by $CC / $CXX (those are for C/C++ fuzzers). The sanitizer
-# choice is wired through the workflow (matrix.sanitizer).
-# cargo fuzz build reads it from $SANITIZER env var? No — pass it explicitly.
-cargo +nightly fuzz build \
-    --sanitizer="${SANITIZER:-address}" \
-    --release \
-    -- \
-    || { echo "cargo fuzz build failed"; exit 1; }
+# `cargo fuzz build --release` matches what ClusterFuzzLite's Rust helper
+# expects (binary at target/<triple>/release/<name>). No `--sanitizer` flag
+# — that would override RUSTFLAGS and trip the "two sanitizers at once"
+# build error we hit when wiring RUSTFLAGS ourselves in GH Actions.
+cargo +nightly fuzz build --release
 
-# ClusterFuzzLite convention: binary names must be alphanumeric / `_` / `-`,
-# no extension. We prefix with `zhhz-fuzz-` to avoid colliding with other
-# binaries in $OUT (e.g. upstream `zhhz` CLI from later additions).
+# ClusterFuzzLite binary-name convention: alphanumeric / `_` / `-`, no
+# extension. Prefix `zhhz-fuzz-` so the fuzzer names don't collide with
+# other artifacts in $OUT (e.g. the upstream `zhhz` CLI binary if a
+# future change adds one to the same $OUT).
 BIN_DIR="target/x86_64-unknown-linux-gnu/release"
 for target in fmm_segment convert_roundtrip; do
-    if [ -f "$BIN_DIR/$target" ]; then
-        cp "$BIN_DIR/$target" "$OUT/zhhz-fuzz-$target"
-    else
+    if [ ! -f "$BIN_DIR/$target" ]; then
         echo "::error::expected fuzz binary $BIN_DIR/$target not found"
         exit 1
     fi
+    cp "$BIN_DIR/$target" "$OUT/zhhz-fuzz-$target"
 done
 
-echo "ClusterFuzzLite build OK: $(ls -1 "$OUT"/zhhz-fuzz-* 2>/dev/null)"
+echo "ClusterFuzzLite build OK:"
+ls -la "$OUT"/zhhz-fuzz-*
