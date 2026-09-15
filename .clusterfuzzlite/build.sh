@@ -35,10 +35,11 @@
 #   $OUT/zhhz-fuzz-convert_roundtrip  (libFuzzer binary)
 ################################################################################
 
-# ClusterFuzzLite's compile wrapper invokes `bash -eux $SRC/build.sh`.
-# The wrapper expects to find the project under $SRC/<project_name>. For
-# zhhz that's /src/zhhz. Use that absolute path for the fuzz crate.
-cd /src/zhhz/fuzz
+# ClusterFuzzLite's compile wrapper invokes `bash -eux $SRC/build.sh`
+# after `cd $SRC/<project>`. The mounted project root depends on the CFLite
+# version (some put it at /src/<project>, some at /github/workspace/...).
+# Use $SRC so the build works regardless of mount path.
+cd "$SRC/fuzz"
 
 # `cargo fuzz build --release` matches what ClusterFuzzLite's Rust helper
 # expects (binary at target/<triple>/release/<name>). No `--sanitizer` flag
