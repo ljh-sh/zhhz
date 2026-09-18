@@ -23,7 +23,7 @@ jobs:
         uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
 
       - name: Initialize CodeQL
-        uses: github/codeql-action/init@f6091c0113d1dcf9b98e269ee48e8a7e51b7bdd4 # v3.28.5
+        uses: github/codeql-action/init@b96794f015dfd88f77b49b1c93e0fa7110f94c63 # v4.38.0
         with:
           languages: rust
           queries: security-extended,security-and-quality
